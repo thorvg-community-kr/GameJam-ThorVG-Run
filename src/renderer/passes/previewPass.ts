@@ -12,6 +12,7 @@ import { resetWorldShapeLayers, type TvgShapePool } from './shapePool';
 export interface PreviewPlayerAnchor {
   playerX: number;
   playerY: number;
+  playerRadius: number;
   runCycle: number;
   playerLane: SlashLane;
   playerRotation: number;
@@ -47,18 +48,57 @@ export function renderMenuPreviewPass(
   previewSpeedPxPerSec: number
 ): PreviewPlayerAnchor {
   const speed = Math.max(360, previewSpeedPxPerSec);
-  const isTopBannerStage = width <= 960 && height >= 700;
+  const isShortLandscape = height <= 560;
+  const isMobilePortrait = !isShortLandscape && width <= 680;
+  const isTabletPortrait = !isShortLandscape && width > 680 && width <= 960;
 
-  // Unobstructed left-gutter preview anchor on desktop (at 1280x720: cardWidth=900, leftGutter=190 -> playerX=96.9, reticleX=142.9)
-  // On mobile/tablet portrait (`width <= 960 && height >= 700`), renders a self-contained top-banner 2-Lane stage in `y = 0..152`
-  const cardWidth = Math.min(width - 40, 900);
-  const leftGutter = Math.max(0, (width - cardWidth) * 0.5);
-  const basePlayerX = isTopBannerStage
-    ? Math.max(54, width * 0.20)
-    : leftGutter >= 140
-      ? Math.min(width * 0.22, leftGutter * 0.51)
-      : width * 0.20;
-  const reticleX = isTopBannerStage ? basePlayerX + 42 : basePlayerX + 46;
+  let playerRadius: number;
+  let basePlayerX: number;
+  let reticleX: number;
+  let laneHighY: number;
+  let laneLowY: number;
+  let floorY: number;
+  let deckBottomY: number;
+
+  if (isShortLandscape) {
+    // Short Landscape (`844x390`, `667x375`): Left 32% Hero Showcase column (`y >= 112px` below title)
+    playerRadius = 18;
+    basePlayerX = Math.max(70, Math.round(width * 0.125));
+    reticleX = basePlayerX + 38;
+    laneHighY = Math.max(186, Math.round(height * 0.5));
+    laneLowY = Math.max(278, Math.round(height * 0.75));
+    floorY = laneLowY + 17;
+    deckBottomY = Math.min(height - 8, floorY + 28);
+  } else if (isMobilePortrait) {
+    // Mobile Portrait (`390x844`, `360x800`): Open Hero Banner Stage (`y = 68..228`)
+    playerRadius = 18;
+    basePlayerX = Math.max(72, Math.round(width * 0.22));
+    reticleX = basePlayerX + 40;
+    laneHighY = 128;
+    laneLowY = 178;
+    floorY = 195;
+    deckBottomY = 224;
+  } else if (isTabletPortrait) {
+    // Tablet Portrait (`768x1024`): Open Upper-Center Hero Stage
+    playerRadius = 24;
+    basePlayerX = Math.max(168, Math.round(width * 0.25));
+    reticleX = basePlayerX + 50;
+    laneHighY = Math.max(158, Math.round(height * 0.2));
+    laneLowY = Math.max(246, Math.round(height * 0.32));
+    floorY = laneLowY + 22;
+    deckBottomY = floorY + 48;
+  } else {
+    // Desktop / Laptop Open Hero Stage (`1920x1080`, `1280x720`, `1024x640`)
+    playerRadius = height >= 700 ? 26 : 22;
+    basePlayerX = Math.min(460, Math.max(220, Math.round(width * 0.28)));
+    reticleX = basePlayerX + 56;
+    laneHighY = Math.max(158, Math.round(height * 0.245));
+    laneLowY = Math.max(246, Math.round(height * 0.385));
+    floorY = laneLowY + 22;
+    deckBottomY = floorY + Math.round(Math.min(68, Math.max(36, height * 0.065)));
+  }
+
+  const stageScale = Math.min(1.08, playerRadius / 24);
 
   const scrollPx = timeSec * speed;
   const beatSpacing = 228;
@@ -80,27 +120,21 @@ export function renderMenuPreviewPass(
   const formCfg = FORM_CONFIG[activeForm];
   const [r, g, b] = formCfg.rgb;
 
-  const laneHighY = isTopBannerStage ? 50 : height * 0.45;
-  const laneLowY = isTopBannerStage ? 104 : height * 0.69;
-  const floorY = isTopBannerStage ? 120 : laneLowY + 22;
-  const deckBottomY = isTopBannerStage ? 152 : height;
-
   // 1. Deep cyber background
   shapes.bg.reset().appendRect(0, 0, width, height).fill(9, 11, 22, 255);
 
-  // 2. Fast-scrolling neon rhythm grid
+  // 2. Fast-scrolling neon rhythm grid across full canvas (`0..height`)
   shapes.grid.reset().fill(0, 0, 0, 0);
-  const gridSpacing = 72;
+  const gridSpacing = isMobilePortrait || isShortLandscape ? 54 : 72;
   const scrollOffset = scrollPx % gridSpacing;
   for (let x = -scrollOffset; x <= width; x += gridSpacing) {
-    shapes.grid.moveTo(x, 0).lineTo(x, deckBottomY);
+    shapes.grid.moveTo(x, 0).lineTo(x, height);
   }
-  const firstGridY = isTopBannerStage ? 28 : 76;
-  const gridStepY = isTopBannerStage ? 38 : gridSpacing;
-  for (let y = firstGridY; y < deckBottomY; y += gridStepY) {
+  const firstGridY = isMobilePortrait ? 32 : 48;
+  for (let y = firstGridY; y < height; y += gridSpacing) {
     shapes.grid.moveTo(0, y).lineTo(width, y);
   }
-  shapes.grid.stroke({ width: 1, color: [35, 55, 95, 98] });
+  shapes.grid.stroke({ width: 1, color: [35, 55, 95, 86] });
 
   // Reset all pooled world & VFX layers cleanly with zero paint bleed
   resetWorldShapeLayers(shapes);
@@ -131,14 +165,14 @@ export function renderMenuPreviewPass(
     .fill(0, 0, 0, 0)
     .stroke({ width: 1.9, color: [5, 213, 255, Math.round(86 + beatPulse * 48)] });
 
-  // 4. Continuous 1F Neon Stage Deck + Equalizer Bars
+  // 4. Floating Holographic 1F Neon Stage Bridge + Clamped Equalizer Bars
   shapes.waveFill
     .moveTo(0, deckBottomY)
     .lineTo(0, floorY)
     .lineTo(width, floorY)
     .lineTo(width, deckBottomY)
     .close()
-    .fill(r, g, b, 38)
+    .fill(r, g, b, 36)
     .stroke({ width: 0, color: [0, 0, 0, 0] });
 
   const specTileW = 190;
@@ -150,14 +184,12 @@ export function renderMenuPreviewPass(
     for (let bIdx = 0; bIdx < 3; bIdx++) {
       const barW = specTileW * 0.19;
       const bx = x0 + (bIdx + 0.22) * (specTileW / 3);
-      const eq = 0.28 + 0.50 * Math.abs(Math.sin(timeSec * 5.4 + tileIdx * 0.85 + bIdx));
-      const bh = isTopBannerStage
-        ? Math.max(8, (deckBottomY - floorY - 4) * eq)
-        : Math.max(16, (height - floorY - 14) * eq);
+      const eq = 0.28 + 0.5 * Math.abs(Math.sin(timeSec * 5.4 + tileIdx * 0.85 + bIdx));
+      const bh = Math.max(6, (deckBottomY - floorY - 4) * eq);
       shapes.spectrum.appendRect(bx, deckBottomY - bh, barW, bh, { rx: 2, ry: 2 });
     }
   }
-  shapes.spectrum.fill(r, g, b, 64).stroke({ width: 1, color: [r, g, b, 95] });
+  shapes.spectrum.fill(r, g, b, 68).stroke({ width: 1, color: [r, g, b, 98] });
 
   shapes.waveGlow
     .moveTo(0, floorY)
@@ -165,13 +197,15 @@ export function renderMenuPreviewPass(
     .moveTo(reticleX, laneLowY)
     .lineTo(width, laneLowY)
     .fill(0, 0, 0, 0)
-    .stroke({ width: 7, color: [255, 42, 109, 92] });
+    .stroke({ width: 6.5 * stageScale, color: [255, 42, 109, 92] });
 
   shapes.waveCore
     .moveTo(0, floorY)
     .lineTo(width, floorY)
+    .moveTo(0, deckBottomY)
+    .lineTo(width, deckBottomY)
     .fill(0, 0, 0, 0)
-    .stroke({ width: 3.2, color: [255, 255, 255, 242] });
+    .stroke({ width: 2.6, color: [220, 246, 255, 225] });
 
   // 5. Incoming Beat Targets, Auto-Slash Katana Arcs & Live Sliced Polygon Halves
   let hasBass = true;
@@ -210,7 +244,7 @@ export function renderMenuPreviewPass(
       if (sx < -60 || sx > width + 60) continue;
       // 1F Serrated Sawblade scrolls past cleanly while Crewmate dodges on 2F HIGH
       const spin = -timeSec * 11 + bIdx;
-      const rad = 18;
+      const rad = 18 * stageScale;
       const teeth = 10;
       const step = (Math.PI * 2) / teeth;
       for (let t = 0; t < teeth; t++) {
@@ -234,7 +268,7 @@ export function renderMenuPreviewPass(
     if (dtSec > 0) {
       // Intact incoming beat target approaching the Dual Reticles
       if (sx > width + 60) continue;
-      const rad = 16.5;
+      const rad = 16.5 * stageScale;
 
       if (dtSec <= 0.28) {
         const ratio = Math.max(0, Math.min(1, dtSec / 0.28));
@@ -276,17 +310,18 @@ export function renderMenuPreviewPass(
           .close();
       } else if (kind === 'chord') {
         const octR = rad * 1.14;
+        const beamH = Math.max(4, laneLowY - laneHighY - octR * 1.56);
         shapes.bandTreble.appendRect(
-          sx - 4.5,
+          sx - 4.5 * stageScale,
           laneHighY + octR * 0.78,
-          9,
-          laneLowY - laneHighY - octR * 1.56
+          9 * stageScale,
+          beamH
         );
         shapes.gimmicks.appendRect(
-          sx - 1.8,
+          sx - 1.8 * stageScale,
           laneHighY + octR * 0.78,
-          3.6,
-          laneLowY - laneHighY - octR * 1.56
+          3.6 * stageScale,
+          beamH
         );
         appendRegularPolygonPath(shapes.bandTreble, sx, laneHighY, octR, 8, Math.PI / 8, true);
         appendRegularPolygonPath(shapes.bandTreble, sx, laneLowY, octR, 8, Math.PI / 8, true);
@@ -315,14 +350,14 @@ export function renderMenuPreviewPass(
         const p = age / 0.16;
         const ease = 1 - Math.pow(1 - p, 3);
         const thin = Math.pow(1 - p, 1.5);
-        const halfLen = 68 * (0.45 + 0.65 * ease);
-        const halfThick = 11 * thin;
+        const halfLen = 68 * stageScale * (0.45 + 0.65 * ease);
+        const halfThick = 11 * stageScale * thin;
         if (kind === 'chord') {
           const midY = (laneHighY + laneLowY) * 0.5;
-          appendTaperedBlade(shapes.vfxSlashGold, reticleX, midY, -0.58, halfLen * 1.35, halfThick, 5);
-          appendTaperedBlade(shapes.vfxSlashGold, reticleX, midY, 0.58, halfLen * 1.35, halfThick, -5);
-          appendTaperedBlade(shapes.vfxSlashCore, reticleX, midY, -0.58, halfLen * 1.18, halfThick * 0.48, 2.5);
-          appendTaperedBlade(shapes.vfxSlashCore, reticleX, midY, 0.58, halfLen * 1.18, halfThick * 0.48, -2.5);
+          appendTaperedBlade(shapes.vfxSlashGold, reticleX, midY, -0.58, halfLen * 1.35, halfThick, 5 * stageScale);
+          appendTaperedBlade(shapes.vfxSlashGold, reticleX, midY, 0.58, halfLen * 1.35, halfThick, -5 * stageScale);
+          appendTaperedBlade(shapes.vfxSlashCore, reticleX, midY, -0.58, halfLen * 1.18, halfThick * 0.48, 2.5 * stageScale);
+          appendTaperedBlade(shapes.vfxSlashCore, reticleX, midY, 0.58, halfLen * 1.18, halfThick * 0.48, -2.5 * stageScale);
           hasSlashGold = true;
           hasSlashCore = true;
         } else {
@@ -358,13 +393,14 @@ export function renderMenuPreviewPass(
       const centersY =
         kind === 'chord' ? [laneHighY, laneLowY] : [kind === 'low' ? laneLowY : laneHighY];
       const baseCutAngle = kind === 'low' ? 0.36 : kind === 'chord' ? -0.52 : -0.42;
+      const shardRadius = 16 * stageScale;
 
       for (let cIdx = 0; cIdx < centersY.length; cIdx++) {
         const cy0 = centersY[cIdx]!;
         if (age <= 0.24) {
           const swP = age / 0.24;
-          const swOuter = 16 + swP * 38;
-          const swInner = Math.max(2, swOuter - 3.0);
+          const swOuter = (16 + swP * 38) * stageScale;
+          const swInner = Math.max(2, swOuter - 3.0 * stageScale);
           const swTarget =
             kind === 'chord' || kind === 'prismHigh'
               ? shapes.vfxGold
@@ -393,23 +429,23 @@ export function renderMenuPreviewPass(
         }
 
         for (const side of [1, -1] as const) {
-          const sep = 6 + age * 88;
+          const sep = (6 + age * 88) * stageScale;
           const nx = -Math.sin(baseCutAngle) * side;
           const ny = Math.cos(baseCutAngle) * side;
           const hx = reticleX - age * speed * 0.32 + nx * sep;
-          const hy = cy0 + ny * sep + 0.5 * 360 * age * age;
+          const hy = cy0 + ny * sep + 0.5 * 360 * stageScale * age * age;
           const spinAngle = baseCutAngle + side * age * 4.8;
-          appendHalfPolygonShard(shardTarget, hx, hy, 16, spinAngle, side);
+          appendHalfPolygonShard(shardTarget, hx, hy, shardRadius, spinAngle, side);
           if (progress < 0.70) {
             const seamRatio = 1 - progress / 0.70;
             appendCutSeamQuad(
               shapes.vfxSlashCore,
               hx,
               hy,
-              16,
+              shardRadius,
               spinAngle,
               side,
-              0.9 + 2.2 * seamRatio,
+              (0.9 + 2.2 * seamRatio) * stageScale,
               1.05
             );
             hasSlashCore = true;
@@ -420,8 +456,8 @@ export function renderMenuPreviewPass(
   }
 
   // 6. Dual Neon Reticle Geometry
-  const rHigh = (playerLane === 'high' ? 22 : 19.5) * (1 + reticlePulseHigh * 0.38);
-  const rLow = (playerLane === 'low' ? 22 : 19.5) * (1 + reticlePulseLow * 0.38);
+  const rHigh = (playerLane === 'high' ? 22 : 19.5) * stageScale * (1 + reticlePulseHigh * 0.38);
+  const rLow = (playerLane === 'low' ? 22 : 19.5) * stageScale * (1 + reticlePulseLow * 0.38);
   const rotH = timeSec * 1.0 + reticlePulseHigh * 0.4;
   const rotL = -timeSec * 1.0 - reticlePulseLow * 0.4;
 
@@ -525,7 +561,7 @@ export function renderMenuPreviewPass(
       .stroke({ width: 1.1, color: [255, 255, 255, 225] });
   }
 
-  const slashLunge = Math.max(reticlePulseHigh, reticlePulseLow) * 10;
+  const slashLunge = Math.max(reticlePulseHigh, reticlePulseLow) * 10 * stageScale;
   const playerX = basePlayerX + slashLunge;
   const targetY =
     activeKind === 'chord'
@@ -533,9 +569,9 @@ export function renderMenuPreviewPass(
       : playerLane === 'high'
         ? laneHighY
         : laneLowY;
-  const playerY = targetY + Math.sin(timeSec * 8.0) * 2.5;
+  const playerY = targetY + Math.sin(timeSec * 8.0) * (2.5 * stageScale);
   const playerRotation = playerLane === 'high' ? 0.06 : 0.09;
   const runCycle = timeSec * (speed / 440);
 
-  return { playerX, playerY, runCycle, playerLane, playerRotation, activeForm };
+  return { playerX, playerY, playerRadius, runCycle, playerLane, playerRotation, activeForm };
 }

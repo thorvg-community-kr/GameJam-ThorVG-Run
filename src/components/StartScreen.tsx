@@ -24,6 +24,7 @@ import {
   type TrackMetadata,
 } from '../types/game';
 import { MenuTooltipPortal, useMenuTooltip, type MenuTooltipData } from './MenuTooltip';
+import { HudVectorIcon, SkinVectorPreview } from './SkinVectorPreview';
 
 export type MenuStep = 'setup' | 'track';
 
@@ -66,7 +67,7 @@ export const StartScreen: React.FC<StartScreenProps> = ({
   const { lang, setLang, t, format } = useI18n();
   const isCoarsePointer = useCoarsePointer();
   const ctrlGuide = isCoarsePointer ? t.menu.controlsTouch : t.menu.controls;
-  const cardRef = useRef<HTMLDivElement | null>(null);
+  const stepBodyRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<string | null>(null);
@@ -74,8 +75,8 @@ export const StartScreen: React.FC<StartScreenProps> = ({
   const { activeTip, activeTipId, showTip, toggleTouchTip, hideTip } = useMenuTooltip();
 
   useEffect(() => {
-    if (cardRef.current) {
-      cardRef.current.scrollTop = 0;
+    if (stepBodyRef.current) {
+      stepBodyRef.current.scrollTop = 0;
     }
   }, [step]);
 
@@ -135,6 +136,7 @@ export const StartScreen: React.FC<StartScreenProps> = ({
 
   const allTracks = [...BUILT_IN_TRACKS, ...customTracks];
   const equippedSkinCfg = CREWMATE_SKIN_CONFIG[selectedSkin];
+  const currentTrackTitle = trackTitle(t, selectedTrack);
 
   const introTip: MenuTooltipData = {
     id: 'intro-info',
@@ -156,6 +158,7 @@ export const StartScreen: React.FC<StartScreenProps> = ({
 
   const rendererOptions: ReadonlyArray<{
     mode: RendererMode;
+    icon: 'cpu' | 'gpu';
     testId: string;
     title: string;
     desc: string;
@@ -163,6 +166,7 @@ export const StartScreen: React.FC<StartScreenProps> = ({
   }> = [
     {
       mode: 'sw',
+      icon: 'cpu',
       testId: 'renderer-option-sw',
       title: t.menu.rendererCpuTitle,
       desc: t.menu.rendererCpuDesc,
@@ -176,6 +180,7 @@ export const StartScreen: React.FC<StartScreenProps> = ({
     },
     {
       mode: 'gl',
+      icon: 'gpu',
       testId: 'renderer-option-gl',
       title: t.menu.rendererGpuTitle,
       desc: t.menu.rendererGpuDesc,
@@ -273,6 +278,7 @@ export const StartScreen: React.FC<StartScreenProps> = ({
   return (
     <div
       className="start-screen-backdrop"
+      onScrollCapture={hideTip}
       onDragOver={(e) => {
         e.preventDefault();
         setIsDragging(true);
@@ -284,207 +290,502 @@ export const StartScreen: React.FC<StartScreenProps> = ({
         void handleFiles(e.dataTransfer.files);
       }}
     >
-      <div
-        ref={cardRef}
-        className={`start-card${isDragging ? ' dragging' : ''}`}
-        data-testid="start-card"
-        data-menu-step={step}
-        data-engine-ready={engineReady ? 'true' : 'false'}
-        onScrollCapture={hideTip}
-      >
-        <header className="start-header">
-          <div>
+      {/* Top Cyberpunk Arcade Hero HUD Bar */}
+      <header className="hero-top-bar" data-testid="hero-top-bar">
+        <div className="hero-brand-cluster">
+          <div className="hero-eyebrow-row">
             <span className="badge-version">{t.menu.versionBadge}</span>
-            <h1 className="title-logo">THORVG RUN</h1>
-            <div className="subtitle-row">
-              <p className="subtitle">{t.menu.subtitle}</p>
-              <button
-                type="button"
-                className="menu-info-badge"
-                data-testid="menu-intro-info-btn"
-                aria-label={t.menu.introTipTitle}
-                {...bindHoverTip(introTip)}
-                onClick={(e) => toggleTouchTip(e, introTip)}
-              >
-                ⓘ
-              </button>
-            </div>
-          </div>
-          <div className="header-actions">
-            <div className="lang-toggle" role="group" aria-label={t.menu.language}>
-              {LANGS.map((code) => (
-                <button
-                  key={code}
-                  type="button"
-                  lang={code}
-                  className={`lang-btn ${lang === code ? 'active' : ''}`}
-                  aria-pressed={lang === code}
-                  onClick={() => setLang(code)}
-                >
-                  {LANGUAGE_LABELS[code]}
-                </button>
-              ))}
-            </div>
-            <a
-              href="https://github.com/OSSCA-thorvg/GameJam-ThorVG-Run"
-              target="_blank"
-              rel="noreferrer"
-              className="github-link"
+            <span
+              className={`hero-engine-chip ${rendererMode === 'gl' ? 'is-gpu' : 'is-cpu'}`}
+              aria-hidden="true"
             >
-              {t.menu.github}
-            </a>
+              {rendererMode === 'sw' ? 'SWCANVAS' : 'GLCANVAS'}
+            </span>
           </div>
-        </header>
+          <div className="hero-title-row">
+            <h1 className="title-logo">
+              THORVG <span className="title-logo-accent">RUN</span>
+            </h1>
+            <button
+              type="button"
+              className="menu-info-badge hero-info-btn"
+              data-testid="menu-intro-info-btn"
+              aria-label={t.menu.introTipTitle}
+              {...bindHoverTip(introTip)}
+              onClick={(e) => toggleTouchTip(e, introTip)}
+            >
+              ⓘ
+            </button>
+          </div>
+          <p className="subtitle">{t.menu.subtitle}</p>
+        </div>
 
-        <nav className="menu-stepper" data-testid="menu-stepper" aria-label={t.menu.stepperLabel}>
-          <button
-            type="button"
-            data-testid="menu-step-setup"
-            aria-current={step === 'setup' ? 'step' : undefined}
-            className={`menu-step-tab${step === 'setup' ? ' active' : ' completed'}`}
-            {...bindHoverTip(stepSetupTip)}
-            onClick={() => onStepChange('setup')}
+        <div className="header-actions">
+          <div className="lang-toggle" role="group" aria-label={t.menu.language}>
+            {LANGS.map((code) => (
+              <button
+                key={code}
+                type="button"
+                lang={code}
+                className={`lang-btn ${lang === code ? 'active' : ''}`}
+                aria-pressed={lang === code}
+                onClick={() => setLang(code)}
+              >
+                {LANGUAGE_LABELS[code]}
+              </button>
+            ))}
+          </div>
+          <a
+            href="https://github.com/OSSCA-thorvg/GameJam-ThorVG-Run"
+            target="_blank"
+            rel="noreferrer"
+            className="github-link"
           >
-            <span className="menu-step-num" aria-hidden="true">
-              {step === 'track' ? '✓' : '1'}
-            </span>
-            <span className="menu-step-copy">
-              <strong>{t.menu.stepSetupTitle}</strong>
-            </span>
-          </button>
+            {t.menu.github}
+          </a>
+        </div>
+      </header>
 
-          <button
-            type="button"
-            data-testid="menu-step-track"
-            aria-current={step === 'track' ? 'step' : undefined}
-            className={`menu-step-tab${step === 'track' ? ' active' : ''}`}
-            {...bindHoverTip(stepTrackTip)}
-            onClick={() => onStepChange('track')}
-          >
-            <span className="menu-step-num" aria-hidden="true">
-              2
-            </span>
-            <span className="menu-step-copy">
-              <strong>{t.menu.stepTrackTitle}</strong>
-            </span>
-          </button>
-        </nav>
+      {/* Bottom / Corner Angled Cut-Corner Cyberpunk Command Dock */}
+      <div
+        className={`cyber-dock-shell${isDragging ? ' dragging' : ''}`}
+        data-testid="cyber-dock-shell"
+      >
+        <div
+          className={`start-card${isDragging ? ' dragging' : ''}`}
+          data-testid="start-card"
+          data-menu-step={step}
+          data-engine-ready={engineReady ? 'true' : 'false'}
+        >
+          <nav className="menu-stepper" data-testid="menu-stepper" aria-label={t.menu.stepperLabel}>
+            <button
+              type="button"
+              data-testid="menu-step-setup"
+              aria-current={step === 'setup' ? 'step' : undefined}
+              className={`menu-step-tab${step === 'setup' ? ' active' : ' completed'}`}
+              {...bindHoverTip(stepSetupTip)}
+              onClick={() => onStepChange('setup')}
+            >
+              <span className="menu-step-num" aria-hidden="true">
+                {step === 'track' ? '✓' : '01'}
+              </span>
+              <span className="menu-step-copy">
+                <strong>{t.menu.stepSetupTitle}</strong>
+              </span>
+              <span className="step-summary-tag" aria-hidden="true">
+                {rendererMode === 'sw' ? 'SW' : 'GL'} · {t.skins[selectedSkin].name}
+              </span>
+            </button>
 
-        {step === 'setup' ? (
-          <>
-            <div className="menu-step-body" data-step="setup">
-              {/* 1. Select Renderer Backend */}
-              <section className="menu-section">
-                <h2>{t.menu.rendererSection}</h2>
-                <div className="renderer-radio-group">
-                  {rendererOptions.map((opt) => (
-                    <label
-                      key={opt.mode}
-                      data-testid={opt.testId}
-                      className={`renderer-option${rendererMode === opt.mode ? ' selected' : ''}`}
-                      onPointerEnter={(e) => {
-                        if (e.pointerType === 'touch') return;
-                        showTip(e.currentTarget, opt.tip);
-                      }}
-                      onPointerLeave={(e) => {
-                        if (e.pointerType === 'touch') return;
-                        hideTip();
-                      }}
-                    >
-                      <input
-                        type="radio"
-                        name="renderer"
-                        checked={rendererMode === opt.mode}
-                        aria-describedby={activeTipId(opt.tip.id)}
-                        onChange={() => onSelectRenderer(opt.mode)}
-                        onFocus={(e) => {
-                          if (
-                            e.currentTarget.matches(':focus-visible') &&
-                            e.currentTarget.parentElement
-                          ) {
-                            showTip(e.currentTarget.parentElement, opt.tip);
-                          }
+            <button
+              type="button"
+              data-testid="menu-step-track"
+              aria-current={step === 'track' ? 'step' : undefined}
+              className={`menu-step-tab${step === 'track' ? ' active' : ''}`}
+              {...bindHoverTip(stepTrackTip)}
+              onClick={() => onStepChange('track')}
+            >
+              <span className="menu-step-num" aria-hidden="true">
+                02
+              </span>
+              <span className="menu-step-copy">
+                <strong>{t.menu.stepTrackTitle}</strong>
+              </span>
+              <span className="step-summary-tag" aria-hidden="true">
+                {currentTrackTitle}
+              </span>
+            </button>
+          </nav>
+
+          <div ref={stepBodyRef} className="menu-step-body" data-step={step}>
+            {step === 'setup' ? (
+              <>
+                {/* 1. Select Renderer Backend */}
+                <section className="menu-section">
+                  <h2>{t.menu.rendererSection}</h2>
+                  <div className="renderer-radio-group">
+                    {rendererOptions.map((opt) => (
+                      <label
+                        key={opt.mode}
+                        data-testid={opt.testId}
+                        data-mode={opt.mode}
+                        className={`renderer-option${rendererMode === opt.mode ? ' selected' : ''}`}
+                        onPointerEnter={(e) => {
+                          if (e.pointerType === 'touch') return;
+                          showTip(e.currentTarget, opt.tip);
                         }}
-                        onBlur={() => {
-                          if (activeTip?.id === opt.tip.id) {
-                            hideTip();
+                        onPointerLeave={(e) => {
+                          if (e.pointerType === 'touch') return;
+                          hideTip();
+                        }}
+                      >
+                        <input
+                          type="radio"
+                          name="renderer"
+                          checked={rendererMode === opt.mode}
+                          aria-describedby={activeTipId(opt.tip.id)}
+                          onChange={() => onSelectRenderer(opt.mode)}
+                          onFocus={(e) => {
+                            if (
+                              e.currentTarget.matches(':focus-visible') &&
+                              e.currentTarget.parentElement
+                            ) {
+                              showTip(e.currentTarget.parentElement, opt.tip);
+                            }
+                          }}
+                          onBlur={() => {
+                            if (activeTip?.id === opt.tip.id) {
+                              hideTip();
+                            }
+                          }}
+                        />
+                        <span className="renderer-icon-frame">
+                          <HudVectorIcon kind={opt.icon} size={18} />
+                        </span>
+                        <div className="renderer-info">
+                          <strong>{opt.title}</strong>
+                          <span>{opt.desc}</span>
+                        </div>
+                        <span className="renderer-led" aria-hidden="true" />
+                        <span className="menu-hover-cue" aria-hidden="true">
+                          ⓘ
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                </section>
+
+                {/* 2. Crewmate Vector Suit Showcase (4-Col Desktop / 2x2 Mobile with Pure SVG Previews) */}
+                <section className="menu-section">
+                  <h2>{t.menu.skinSection}</h2>
+                  <div className="skin-tabs" role="radiogroup" aria-label={t.menu.skinSection}>
+                    {CREWMATE_SKIN_ORDER.map((skinKey) => {
+                      const isEquipped = selectedSkin === skinKey;
+                      const skinCfg = CREWMATE_SKIN_CONFIG[skinKey];
+                      const skinInfo = t.skins[skinKey];
+                      const skinTip: MenuTooltipData = {
+                        id: `skin-${skinKey}`,
+                        title: skinInfo.name,
+                        body: skinInfo.detail,
+                        meta: isEquipped ? t.menu.skinEquipped : t.menu.skinPreviewHint,
+                        accentHex: skinCfg.accentHex,
+                      };
+                      return (
+                        <button
+                          key={skinKey}
+                          type="button"
+                          role="radio"
+                          aria-checked={isEquipped}
+                          data-testid={`skin-tab-${skinKey}`}
+                          data-skin={skinKey}
+                          className={`skin-tab${isEquipped ? ' active' : ''}`}
+                          style={
+                            isEquipped
+                              ? {
+                                  borderColor: skinCfg.accentHex,
+                                  boxShadow: `inset 0 0 18px ${skinCfg.accentHex}26, 0 0 14px ${skinCfg.accentHex}28`,
+                                }
+                              : undefined
                           }
+                          {...bindHoverTip(skinTip)}
+                          onClick={() => onSelectSkin(skinKey)}
+                        >
+                          <div className="skin-card-top">
+                            <small
+                              className={`skin-status-pill ${isEquipped ? 'equipped' : 'available'}`}
+                              style={
+                                isEquipped
+                                  ? { backgroundColor: skinCfg.accentHex, color: '#070914' }
+                                  : undefined
+                              }
+                            >
+                              {isEquipped ? t.menu.skinEquipped : skinInfo.badge}
+                            </small>
+                            <span className="menu-hover-cue" aria-hidden="true">
+                              ⓘ
+                            </span>
+                          </div>
+                          <div className="skin-card-main">
+                            <div className="skin-preview-frame">
+                              <SkinVectorPreview skinId={skinKey} active={isEquipped} />
+                            </div>
+                            <div className="skin-card-copy">
+                              <strong style={{ color: skinCfg.accentHex }}>{skinInfo.name}</strong>
+                              <span className="skin-summary-text">{skinInfo.summary}</span>
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
+              </>
+            ) : (
+              <div className="dock-track-grid">
+                {/* Left Column: Track Bay + Sibling Custom Audio Dropzone */}
+                <div className="dock-col-tracks">
+                  <section className="menu-section menu-track-section">
+                    <div className="track-section-header">
+                      <h2>{t.menu.trackSection}</h2>
+                      <span className="track-count-pill">
+                        {format(t.menu.trackCountSummary, { count: allTracks.length })}
+                      </span>
+                    </div>
+
+                    <div className="track-list" data-testid="menu-track-list">
+                      {allTracks.map((track) => {
+                        const isSelected = selectedTrack.id === track.id;
+                        const title = trackTitle(t, track);
+                        const rec = getTrackRecord(track, difficulty);
+                        const trackTip: MenuTooltipData = {
+                          id: `track-${track.id}`,
+                          title,
+                          body: `${trackArtist(t, track)} · ${format(
+                            track.isCustom ? t.menu.trackTipCustom : t.menu.trackTipBuiltIn,
+                            { seconds: track.durationSec }
+                          )}`,
+                          meta: rec
+                            ? `${t.difficulties[difficulty].shortName} · ${format(
+                                t.menu.bestRecord,
+                                {
+                                  rank: rec.bestRank,
+                                  score: rec.bestScore.toLocaleString(),
+                                }
+                              )} · ★${rec.bestStars}/3${
+                                rec.noMissCleared ? ` · ${t.menu.noMissBadge}` : ''
+                              }`
+                            : format(t.menu.trackNoRecord, {
+                                mode: t.difficulties[difficulty].shortName,
+                              }),
+                          accentHex: '#05D5FF',
+                        };
+                        return (
+                          <button
+                            key={track.id}
+                            type="button"
+                            data-testid={`track-item-${track.id}`}
+                            className={`track-item${isSelected ? ' selected' : ''}`}
+                            {...bindHoverTip(trackTip)}
+                            onClick={() => onSelectTrack(track)}
+                          >
+                            <span className="track-icon">
+                              <HudVectorIcon
+                                kind={track.isCustom ? 'customTrack' : 'track'}
+                                size={17}
+                              />
+                            </span>
+                            <div className="track-meta">
+                              <strong>{title}</strong>
+                              <span>
+                                {format(t.menu.trackMeta, {
+                                  artist: trackArtist(t, track),
+                                  seconds: track.durationSec,
+                                })}
+                              </span>
+                            </div>
+                            {rec && (
+                              <div className="track-record-badges">
+                                <span className="pb-pill">
+                                  {format(t.menu.bestRecord, {
+                                    rank: rec.bestRank,
+                                    score: rec.bestScore.toLocaleString(),
+                                  })}
+                                </span>
+                                <span className="pb-stars-pill">★ {rec.bestStars}/3</span>
+                                {rec.noMissCleared && (
+                                  <span className="pb-nomiss-pill">{t.menu.noMissBadge}</span>
+                                )}
+                              </div>
+                            )}
+                            {isSelected && <span className="selected-pill">{t.menu.selected}</span>}
+                            <span className="menu-hover-cue" aria-hidden="true">
+                              ⓘ
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <div className="upload-dropzone-row">
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept={acceptAttr}
+                        tabIndex={-1}
+                        aria-hidden="true"
+                        style={{ display: 'none' }}
+                        onChange={(e) => {
+                          void handleFiles(e.target.files);
+                          // Allow re-selecting the same file after an error.
+                          e.target.value = '';
                         }}
                       />
-                      <span className="radio-dot" />
-                      <div className="renderer-info">
-                        <strong>{opt.title}</strong>
-                        <span>{opt.desc}</span>
-                      </div>
-                      <span className="menu-hover-cue" aria-hidden="true">
-                        ⓘ
-                      </span>
-                    </label>
-                  ))}
-                </div>
-              </section>
-
-              {/* 2. Crewmate Vector Suit & Blade Trail (2x2 Grid — All 4 Unlocked) */}
-              <section className="menu-section">
-                <h2>{t.menu.skinSection}</h2>
-                <div className="skin-tabs" role="radiogroup" aria-label={t.menu.skinSection}>
-                  {CREWMATE_SKIN_ORDER.map((skinKey) => {
-                    const isEquipped = selectedSkin === skinKey;
-                    const skinCfg = CREWMATE_SKIN_CONFIG[skinKey];
-                    const skinInfo = t.skins[skinKey];
-                    const skinTip: MenuTooltipData = {
-                      id: `skin-${skinKey}`,
-                      title: skinInfo.name,
-                      body: skinInfo.detail,
-                      meta: isEquipped ? t.menu.skinEquipped : t.menu.skinPreviewHint,
-                      accentHex: skinCfg.accentHex,
-                    };
-                    return (
-                      <button
-                        key={skinKey}
-                        type="button"
-                        role="radio"
-                        aria-checked={isEquipped}
-                        data-testid={`skin-tab-${skinKey}`}
-                        data-skin={skinKey}
-                        className={`skin-tab${isEquipped ? ' active' : ''}`}
-                        style={
-                          isEquipped
-                            ? {
-                                borderColor: skinCfg.accentHex,
-                                boxShadow: `0 0 16px ${skinCfg.accentHex}33`,
-                              }
-                            : undefined
-                        }
-                        {...bindHoverTip(skinTip)}
-                        onClick={() => onSelectSkin(skinKey)}
+                      <div
+                        className="upload-dropzone"
+                        data-testid="menu-upload-dropzone"
+                        role="button"
+                        tabIndex={0}
+                        {...bindHoverTip(uploadDropzoneTip)}
+                        onClick={() => fileInputRef.current?.click()}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            fileInputRef.current?.click();
+                          }
+                        }}
                       >
-                        <div className="skin-tab-header">
-                          <strong style={{ color: skinCfg.accentHex }}>{skinInfo.name}</strong>
-                          <small
-                            className={`skin-status-pill ${isEquipped ? 'equipped' : 'available'}`}
-                            style={
-                              isEquipped
-                                ? { backgroundColor: skinCfg.accentHex, color: '#070914' }
-                                : undefined
-                            }
-                          >
-                            {isEquipped ? t.menu.skinEquipped : skinInfo.badge}
-                          </small>
-                        </div>
-                        <div className="skin-tab-sub">
-                          <span className="skin-summary-text">{skinInfo.summary}</span>
-                          <span className="menu-hover-cue" aria-hidden="true">
-                            ⓘ
-                          </span>
-                        </div>
+                        <span className="upload-dropzone-left">
+                          <HudVectorIcon kind="plus" size={14} />
+                          <span className="upload-dropzone-title">{t.upload.dropzone}</span>
+                        </span>
+                        <span className="upload-dropzone-sub">{t.upload.dropzoneSub}</span>
+                      </div>
+                      <button
+                        type="button"
+                        className="menu-info-badge upload-format-btn"
+                        data-testid="menu-upload-info-btn"
+                        aria-label={t.upload.tipTitle}
+                        {...bindHoverTip(uploadInfoTip)}
+                        onClick={(e) => toggleTouchTip(e, uploadInfoTip)}
+                      >
+                        {t.upload.formatBadge}
                       </button>
-                    );
-                  })}
+                    </div>
+                    {uploadStatus && <small className="upload-status">{uploadStatus}</small>}
+                  </section>
                 </div>
-              </section>
-            </div>
 
+                {/* Right Column: Play Mode Switch + Loadout Summary + 2x2 Controls Matrix */}
+                <div className="dock-col-ops">
+                  <div className="menu-mode-loadout-bar" data-testid="menu-mode-loadout-bar">
+                    <div
+                      className="difficulty-tabs"
+                      role="radiogroup"
+                      aria-label={t.menu.difficultySection}
+                    >
+                      {DIFFICULTY_MODES.map((modeKey) => {
+                        const accent = DIFFICULTY_CONFIG[modeKey].colorHex;
+                        const info = t.difficulties[modeKey];
+                        const active = difficulty === modeKey;
+                        const modeRec = getTrackRecord(selectedTrack, modeKey);
+                        const diffTip: MenuTooltipData = {
+                          id: `difficulty-${modeKey}`,
+                          title: info.tipTitle,
+                          body: info.tipBody,
+                          meta: modeRec
+                            ? `${format(t.menu.bestRecord, {
+                                rank: modeRec.bestRank,
+                                score: modeRec.bestScore.toLocaleString(),
+                              })} · ★${modeRec.bestStars}/3`
+                            : info.tag,
+                          accentHex: accent,
+                        };
+                        return (
+                          <button
+                            key={modeKey}
+                            type="button"
+                            role="radio"
+                            aria-checked={active}
+                            data-testid={`difficulty-tab-${modeKey}`}
+                            data-difficulty={modeKey}
+                            className={`difficulty-tab${active ? ' active' : ''}`}
+                            style={{
+                              borderColor: active ? accent : undefined,
+                              boxShadow: active ? `inset 0 0 14px ${accent}22` : undefined,
+                            }}
+                            {...bindHoverTip(diffTip)}
+                            onClick={() => onSelectDifficulty(modeKey)}
+                          >
+                            <span
+                              className="difficulty-title-wrap"
+                              style={{ color: active ? accent : '#dce8ff' }}
+                            >
+                              <HudVectorIcon kind={modeKey} size={14} />
+                              <strong>{info.shortName}</strong>
+                            </span>
+                            <small className="difficulty-speed-pill">{info.tag}</small>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <div className="menu-loadout-summary" data-testid="menu-loadout-summary">
+                      <span className="loadout-chip">
+                        <HudVectorIcon kind={rendererMode === 'sw' ? 'cpu' : 'gpu'} size={13} />
+                        <span>
+                          {rendererMode === 'sw' ? t.menu.loadoutCpuShort : t.menu.loadoutGpuShort}
+                        </span>
+                      </span>
+                      <span
+                        className="loadout-chip skin-chip"
+                        style={{
+                          borderColor: `${equippedSkinCfg.accentHex}66`,
+                          color: equippedSkinCfg.accentHex,
+                        }}
+                      >
+                        ✦ {t.skins[selectedSkin].name}
+                      </span>
+                      <button
+                        type="button"
+                        className="loadout-edit-btn"
+                        data-testid="menu-edit-setup-btn"
+                        {...bindHoverTip(editSetupTip)}
+                        onClick={() => onStepChange('setup')}
+                      >
+                        <HudVectorIcon kind="gear" size={13} />
+                        <span>{t.menu.editSetupBtn}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 2-Lane Core Controls Guide */}
+                  <div className="menu-controls-wrap">
+                    <div className="controls-header-row">
+                      <h3 className="controls-guide-title">{t.menu.controlsSectionTitle}</h3>
+                      <button
+                        type="button"
+                        className="menu-info-badge"
+                        data-testid="menu-resonance-info-btn"
+                        aria-label={t.menu.resonanceTipTitle}
+                        {...bindHoverTip(resonanceInfoTip)}
+                        onClick={(e) => toggleTouchTip(e, resonanceInfoTip)}
+                      >
+                        {t.menu.resonanceBadge}
+                      </button>
+                    </div>
+                    <div className="controls-pill-grid" data-testid="menu-controls-guide">
+                      {controlPills.map((pill) => {
+                        const pillTip: MenuTooltipData = {
+                          id: pill.id,
+                          title: `${pill.tag} · ${pill.desc}`,
+                          body: pill.detail,
+                          meta: pill.keyText,
+                          accentHex: pill.accentHex,
+                        };
+                        return (
+                          <div
+                            key={pill.id}
+                            tabIndex={0}
+                            className={`control-guide-pill ${pill.toneClass}`}
+                            {...bindHoverTip(pillTip)}
+                            onClick={(e) => toggleTouchTip(e, pillTip)}
+                          >
+                            <div className="control-pill-top">
+                              <span className="control-lane-tag">{pill.tag}</span>
+                              <strong>{pill.keyText}</strong>
+                            </div>
+                            <small>{pill.desc}</small>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {step === 'setup' ? (
             <footer className="start-footer">
               <button
                 type="button"
@@ -495,247 +796,7 @@ export const StartScreen: React.FC<StartScreenProps> = ({
                 {t.menu.nextToTrackBtn}
               </button>
             </footer>
-          </>
-        ) : (
-          <>
-            <div className="menu-step-body" data-step="track">
-              {/* Top Play Mode Toggle & Step 1 Loadout Summary Bar */}
-              <div className="menu-mode-loadout-bar" data-testid="menu-mode-loadout-bar">
-                <div className="menu-mode-loadout-top">
-                  <div
-                    className="difficulty-tabs"
-                    role="radiogroup"
-                    aria-label={t.menu.difficultySection}
-                  >
-                    {DIFFICULTY_MODES.map((modeKey) => {
-                      const accent = DIFFICULTY_CONFIG[modeKey].colorHex;
-                      const info = t.difficulties[modeKey];
-                      const active = difficulty === modeKey;
-                      const modeRec = getTrackRecord(selectedTrack, modeKey);
-                      const diffTip: MenuTooltipData = {
-                        id: `difficulty-${modeKey}`,
-                        title: info.tipTitle,
-                        body: info.tipBody,
-                        meta: modeRec
-                          ? `${format(t.menu.bestRecord, {
-                              rank: modeRec.bestRank,
-                              score: modeRec.bestScore.toLocaleString(),
-                            })} · ★${modeRec.bestStars}/3`
-                          : info.tag,
-                        accentHex: accent,
-                      };
-                      return (
-                        <button
-                          key={modeKey}
-                          type="button"
-                          role="radio"
-                          aria-checked={active}
-                          data-testid={`difficulty-tab-${modeKey}`}
-                          data-difficulty={modeKey}
-                          className={`difficulty-tab${active ? ' active' : ''}`}
-                          style={{
-                            borderColor: active ? accent : undefined,
-                            boxShadow: active ? `0 0 16px ${accent}33` : undefined,
-                          }}
-                          {...bindHoverTip(diffTip)}
-                          onClick={() => onSelectDifficulty(modeKey)}
-                        >
-                          <strong style={{ color: active ? accent : '#dce8ff' }}>
-                            {modeKey === 'casual' ? '🛡️' : '⚔️'} {info.shortName}
-                          </strong>
-                          <small className="difficulty-speed-pill">{info.tag}</small>
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  <div className="menu-loadout-summary" data-testid="menu-loadout-summary">
-                    <span className="loadout-chip">
-                      {rendererMode === 'sw' ? t.menu.loadoutCpuShort : t.menu.loadoutGpuShort}
-                    </span>
-                    <span
-                      className="loadout-chip skin-chip"
-                      style={{
-                        borderColor: `${equippedSkinCfg.accentHex}66`,
-                        color: equippedSkinCfg.accentHex,
-                      }}
-                    >
-                      ✦ {t.skins[selectedSkin].name}
-                    </span>
-                    <button
-                      type="button"
-                      className="loadout-edit-btn"
-                      data-testid="menu-edit-setup-btn"
-                      {...bindHoverTip(editSetupTip)}
-                      onClick={() => onStepChange('setup')}
-                    >
-                      {t.menu.editSetupBtn}
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* Select Track & Custom Audio Dropzone */}
-              <section className="menu-section menu-track-section">
-                <div className="track-section-header">
-                  <h2>{t.menu.trackSection}</h2>
-                  <span className="track-count-pill">
-                    {format(t.menu.trackCountSummary, { count: allTracks.length })}
-                  </span>
-                </div>
-
-                <div className="track-list" data-testid="menu-track-list">
-                  {allTracks.map((track) => {
-                    const isSelected = selectedTrack.id === track.id;
-                    const title = trackTitle(t, track);
-                    const rec = getTrackRecord(track, difficulty);
-                    const trackTip: MenuTooltipData = {
-                      id: `track-${track.id}`,
-                      title,
-                      body: `${trackArtist(t, track)} · ${format(
-                        track.isCustom ? t.menu.trackTipCustom : t.menu.trackTipBuiltIn,
-                        { seconds: track.durationSec }
-                      )}`,
-                      meta: rec
-                        ? `${t.difficulties[difficulty].shortName} · ${format(t.menu.bestRecord, {
-                            rank: rec.bestRank,
-                            score: rec.bestScore.toLocaleString(),
-                          })} · ★${rec.bestStars}/3${rec.noMissCleared ? ` · ${t.menu.noMissBadge}` : ''}`
-                        : format(t.menu.trackNoRecord, {
-                            mode: t.difficulties[difficulty].shortName,
-                          }),
-                      accentHex: '#05D5FF',
-                    };
-                    return (
-                      <button
-                        key={track.id}
-                        type="button"
-                        data-testid={`track-item-${track.id}`}
-                        className={`track-item${isSelected ? ' selected' : ''}`}
-                        {...bindHoverTip(trackTip)}
-                        onClick={() => onSelectTrack(track)}
-                      >
-                        <span className="track-icon">{track.isCustom ? '📂' : '🎵'}</span>
-                        <div className="track-meta">
-                          <strong>{title}</strong>
-                          <span>
-                            {format(t.menu.trackMeta, {
-                              artist: trackArtist(t, track),
-                              seconds: track.durationSec,
-                            })}
-                          </span>
-                        </div>
-                        {rec && (
-                          <div className="track-record-badges">
-                            <span className="pb-pill">
-                              {format(t.menu.bestRecord, {
-                                rank: rec.bestRank,
-                                score: rec.bestScore.toLocaleString(),
-                              })}
-                            </span>
-                            <span className="pb-stars-pill">★ {rec.bestStars}/3</span>
-                            {rec.noMissCleared && (
-                              <span className="pb-nomiss-pill">{t.menu.noMissBadge}</span>
-                            )}
-                          </div>
-                        )}
-                        {isSelected && <span className="selected-pill">{t.menu.selected}</span>}
-                        <span className="menu-hover-cue" aria-hidden="true">
-                          ⓘ
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                <div className="upload-dropzone-row">
-                  <div
-                    className="upload-dropzone"
-                    data-testid="menu-upload-dropzone"
-                    role="button"
-                    tabIndex={0}
-                    {...bindHoverTip(uploadDropzoneTip)}
-                    onClick={() => fileInputRef.current?.click()}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        fileInputRef.current?.click();
-                      }
-                    }}
-                  >
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      accept={acceptAttr}
-                      style={{ display: 'none' }}
-                      onClick={(e) => e.stopPropagation()}
-                      onChange={(e) => {
-                        void handleFiles(e.target.files);
-                        // Allow re-selecting the same file after an error.
-                        e.target.value = '';
-                      }}
-                    />
-                    <span className="upload-dropzone-title">{t.upload.dropzone}</span>
-                    <span className="upload-dropzone-sub">{t.upload.dropzoneSub}</span>
-                  </div>
-                  <button
-                    type="button"
-                    className="menu-info-badge upload-format-btn"
-                    data-testid="menu-upload-info-btn"
-                    aria-label={t.upload.tipTitle}
-                    {...bindHoverTip(uploadInfoTip)}
-                    onClick={(e) => toggleTouchTip(e, uploadInfoTip)}
-                  >
-                    {t.upload.formatBadge}
-                  </button>
-                </div>
-                {uploadStatus && <small className="upload-status">{uploadStatus}</small>}
-              </section>
-
-              {/* 2-Lane Core Controls Guide */}
-              <div className="menu-controls-wrap">
-                <div className="controls-header-row">
-                  <h3 className="controls-guide-title">{t.menu.controlsSectionTitle}</h3>
-                  <button
-                    type="button"
-                    className="menu-info-badge"
-                    data-testid="menu-resonance-info-btn"
-                    aria-label={t.menu.resonanceTipTitle}
-                    {...bindHoverTip(resonanceInfoTip)}
-                    onClick={(e) => toggleTouchTip(e, resonanceInfoTip)}
-                  >
-                    {t.menu.resonanceBadge}
-                  </button>
-                </div>
-                <div className="controls-pill-grid" data-testid="menu-controls-guide">
-                  {controlPills.map((pill) => {
-                    const pillTip: MenuTooltipData = {
-                      id: pill.id,
-                      title: `${pill.tag} · ${pill.desc}`,
-                      body: pill.detail,
-                      meta: pill.keyText,
-                      accentHex: pill.accentHex,
-                    };
-                    return (
-                      <div
-                        key={pill.id}
-                        tabIndex={0}
-                        className={`control-guide-pill ${pill.toneClass}`}
-                        {...bindHoverTip(pillTip)}
-                        onClick={(e) => toggleTouchTip(e, pillTip)}
-                      >
-                        <div className="control-pill-top">
-                          <span className="control-lane-tag">{pill.tag}</span>
-                          <strong>{pill.keyText}</strong>
-                        </div>
-                        <small>{pill.desc}</small>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-
+          ) : (
             <footer className="start-footer start-footer-dual">
               <button
                 type="button"
@@ -755,8 +816,8 @@ export const StartScreen: React.FC<StartScreenProps> = ({
                 {engineReady ? t.menu.start : t.menu.initializing}
               </button>
             </footer>
-          </>
-        )}
+          )}
+        </div>
       </div>
       <MenuTooltipPortal activeTip={activeTip} hideTip={hideTip} />
     </div>

@@ -506,7 +506,7 @@ export class ThorVGRenderer {
     this.shapes.vfxSlashCrimson.reset().fill(0, 0, 0, 0);
     this.shapes.vfxSlashCore.reset().fill(0, 0, 0, 0);
 
-    const { playerX, playerY, runCycle, playerLane, playerRotation, activeForm } =
+    const { playerX, playerY, playerRadius, runCycle, playerLane, playerRotation, activeForm } =
       renderMenuPreviewPass(
         this.shapes,
         this.width,
@@ -515,16 +515,17 @@ export class ThorVGRenderer {
         previewSpeedPxPerSec
       );
 
-    const heightPx = 24 * CREW_HEIGHT_RATIO;
-    const cy = this.crewAnim ? playerY + 24 - heightPx / 2 : playerY;
+    const scale = playerRadius / 24;
+    const heightPx = playerRadius * CREW_HEIGHT_RATIO;
+    const cy = this.crewAnim ? playerY + playerRadius - heightPx / 2 : playerY;
 
-    // 3 semi-transparent trail ghosts behind the preview Crewmate (never clips < 0)
-    const trailOffsets = [22, 44, 66] as const;
-    for (let idx = 0; idx < trailOffsets.length; idx++) {
-      const offset = trailOffsets[idx]!;
+    // 3 semi-transparent trail ghosts behind the preview Crewmate (scaled so x_min >= +8px)
+    const baseTrailOffsets = [22, 44, 66] as const;
+    for (let idx = 0; idx < baseTrailOffsets.length; idx++) {
+      const offset = baseTrailOffsets[idx]! * scale;
       const gx = playerX - offset;
-      const gy = cy + Math.sin(timeSec * 7.5 - idx * 0.9) * 2.5;
-      const gRadius = 20 * (1 - idx * 0.16);
+      const gy = cy + Math.sin(timeSec * 7.5 - idx * 0.9) * (2.5 * scale);
+      const gRadius = 20 * scale * (1 - idx * 0.16);
       const gRot = previewSkin === 'flawless' ? playerRotation : timeSec * 1.8 + idx * 0.35;
       appendSkinAfterimagePath(
         this.shapes.effects,
@@ -543,7 +544,7 @@ export class ThorVGRenderer {
     this.shapes.effects
       .fill(tr, tg, tb, previewSkin === 'classic' ? 38 : 62)
       .stroke({
-        width: previewSkin === 'classic' ? 1.8 : 2.2,
+        width: (previewSkin === 'classic' ? 1.8 : 2.2) * Math.max(0.85, scale),
         color: [tr, tg, tb, previewSkin === 'classic' ? 155 : 215],
       });
 
@@ -555,7 +556,7 @@ export class ThorVGRenderer {
         skinFrontGlowShape: this.shapes.skinFrontGlow,
         cx: playerX,
         cy,
-        radius: 24,
+        radius: playerRadius,
         rotation: playerRotation,
         form: activeForm,
         skinId: previewSkin,
@@ -574,7 +575,7 @@ export class ThorVGRenderer {
         this.shapes.playerCore,
         playerX,
         playerY,
-        24,
+        playerRadius,
         timeSec * 1.2,
         activeForm,
         1.0
