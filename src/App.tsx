@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AudioEngine } from './audio/AudioEngine';
 import type { AudioFormat } from './audio/audioFormats';
 import { BUILT_IN_TRACKS } from './audio/proceduralTracks';
@@ -11,6 +11,7 @@ import { GameEngine } from './engine/GameEngine';
 import { InputController } from './engine/InputController';
 import {
   loadAudioOffsetMs,
+  loadGuideDismissed,
   loadSelectedSkin,
   saveAudioOffsetMs,
   saveSelectedSkin,
@@ -96,6 +97,7 @@ export const App: React.FC = () => {
   const [cinematicCamera, setCinematicCamera] = useState<boolean>(() => loadInitialCinematic());
   const [difficulty, setDifficulty] = useState<DifficultyMode>('standard');
   const [menuStep, setMenuStep] = useState<MenuStep>('setup');
+  const [isGuideOpen, setIsGuideOpen] = useState<boolean>(false);
   const [selectedSkin, setSelectedSkin] = useState<CrewmateSkinId>(() => loadSelectedSkin());
   const [audioOffsetMs, setAudioOffsetMs] = useState<number>(() => loadAudioOffsetMs());
   const [engineReady, setEngineReady] = useState<boolean>(false);
@@ -148,7 +150,17 @@ export const App: React.FC = () => {
 
   // The splash plays once per page load, even if the renderer is re-created later.
   const splashStartedRef = useRef<boolean>(false);
+  const hasAutoOpenedGuideRef = useRef<boolean>(false);
   const launchSeqRef = useRef<number>(0);
+
+  // Auto-open the beginner guide once per session on first entry to 'menu' (unless dismissed).
+  useLayoutEffect(() => {
+    if (screen !== 'menu' || hasAutoOpenedGuideRef.current) return;
+    hasAutoOpenedGuideRef.current = true;
+    if (!loadGuideDismissed()) {
+      setIsGuideOpen(true);
+    }
+  }, [screen]);
 
   if (!audioRef.current) {
     audioRef.current = new AudioEngine();
@@ -384,6 +396,7 @@ export const App: React.FC = () => {
     const engine = gameEngineRef.current;
     if (!engine) return;
 
+    setIsGuideOpen(false);
     audioRef.current?.unlockFromGesture();
     const seq = ++launchSeqRef.current;
     finishedAtRef.current = 0;
@@ -532,6 +545,9 @@ export const App: React.FC = () => {
           selectedSkin={selectedSkin}
           engineReady={engineReady}
           step={menuStep}
+          isGuideOpen={isGuideOpen}
+          onOpenGuide={() => setIsGuideOpen(true)}
+          onCloseGuide={() => setIsGuideOpen(false)}
           onStepChange={setMenuStep}
           onSelectTrack={setSelectedTrack}
           onUploadFile={handleUploadFile}

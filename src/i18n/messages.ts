@@ -32,6 +32,7 @@ export const en = {
     introTipTitle: 'ThorVG Run v6.0',
     introTipBody:
       'Real-time 4-Band STFT beat-synced 2-Lane katana action with pure ThorVG 2D vector polygon slicing.',
+    guideBtn: 'Guide',
     github: 'GitHub ↗',
     language: 'Language',
     trackSection: 'Tracks',
@@ -340,6 +341,49 @@ export const en = {
     failedProgress: 'REACHED {pct}% OF TRACK',
     instantRetry: '↻ Instant Retry [Space]',
   },
+  guide: {
+    badge: 'QUICK PLAY GUIDE',
+    title: 'How to Play in 10 Seconds',
+    subtitle:
+      'Match upper & lower beats at the left reticles — every katana slice bisects pure 2D vectors live.',
+    dismissLabel: "Don't auto-open next time",
+    closeBtn: 'Got It · Ready to Play',
+    closeAria: 'Close play guide',
+    cards: {
+      slash: {
+        step: 'STEP 01',
+        title: '2-Lane Beat Slash',
+        chipHigh: '2F [F·D·W / ↑ / Click]',
+        chipHighTouch: '2F [Top Tap / HIGH]',
+        chipLow: '1F [J·K·S / ↓ / R-Click]',
+        chipLowTouch: '1F [Low Tap / LOW]',
+        desc: 'Slash Cyan upper targets on 2F and Crimson lower targets on 1F right as they enter the left neon rings.',
+      },
+      chord: {
+        step: 'STEP 02',
+        title: 'Gold Cross & Hold Ribbons',
+        chipChord: 'DUAL [Space / F+J]',
+        chipChordTouch: 'DUAL [2-Finger / CROSS]',
+        chipHold: 'HOLD [Keep Pressed]',
+        desc: 'Cleave vertically linked Gold Twin Cores together, and keep holding until long neon ribbons end.',
+      },
+      dodge: {
+        step: 'STEP 03',
+        title: 'Dodge Red Saws & Mines',
+        chipSaw: '1F Saw → 2F Upper Slash',
+        chipMine: '2F Mine → 1F Lower Slash',
+        desc: 'Never slash red hazards! Slash the opposite lane to leap over ground saws or duck under sky mines (0 air-slash penalty).',
+      },
+      modes: {
+        step: 'STEP 04',
+        title: 'Casual Mode, Boost & 20x Zoom',
+        chipCasual: '★ Beginner: Casual (No-Fail)',
+        chipBoost: '[Shift] Boost · [Esc] 20x Zoom',
+        chipBoostTouch: 'Tap Boost · Pinch 20x Zoom',
+        desc: 'New here? Pick Casual (No-Fail) in Step 2! Trigger 100% Overdrive (2x Score · HP Heal · Hazard Smash) or drop in your own MP3.',
+      },
+    },
+  },
 };
 
 export type Messages = typeof en;
@@ -354,6 +398,7 @@ export const ko: Messages = {
     introTipTitle: 'ThorVG Run v6.0',
     introTipBody:
       '음원 비트를 실시간 4-Band STFT로 분석해 상·하단 타겟을 베어내는 순수 2D 벡터 폴리곤 절단 리듬 액션입니다.',
+    guideBtn: '가이드',
     github: 'GitHub ↗',
     language: '언어',
     trackSection: '음원 선택',
@@ -661,6 +706,49 @@ export const ko: Messages = {
     failedBadge: '그루브 소진 · 스테이지 실패',
     failedProgress: '곡 진행률 {pct}% 도달',
     instantRetry: '↻ 즉시 재도전 [Space]',
+  },
+  guide: {
+    badge: '초보자 퀵 플레이 가이드',
+    title: '처음이어도 쉬운 10초 핵심 가이드',
+    subtitle:
+      '다가오는 비트를 좌측 판정 링 타이밍에 맞춰 상·하단으로 베어내세요 — 모든 참격이 순수 2D 벡터를 실시간 절단합니다.',
+    dismissLabel: '다음부터 자동으로 열지 않기',
+    closeBtn: '이해했어요 · 시작 준비',
+    closeAria: '플레이 가이드 닫기',
+    cards: {
+      slash: {
+        step: 'STEP 01',
+        title: '2-Lane 상·하단 리듬 베기',
+        chipHigh: '2F [F·D·W / ↑ / 클릭]',
+        chipHighTouch: '2F [상단 탭 / HIGH]',
+        chipLow: '1F [J·K·S / ↓ / 우클릭]',
+        chipLowTouch: '1F [하단 탭 / LOW]',
+        desc: '타겟이 좌측 판정 링에 닿는 순간, 청록 타겟은 상단(2F)·진홍 타겟은 하단(1F)으로 베어내세요.',
+      },
+      chord: {
+        step: 'STEP 02',
+        title: '황금 동시 베기 & 롱노트',
+        chipChord: '동시 [Space / F+J]',
+        chipChordTouch: '동시 [양손 탭 / CROSS]',
+        chipHold: '롱노트 [끝까지 유지]',
+        desc: '위·아래가 연결된 황금 타겟은 동시에 양단하고, 긴 리본 노트는 끝이 지날 때까지 유지하세요.',
+      },
+      dodge: {
+        step: 'STEP 03',
+        title: '붉은 톱날 · 기뢰 회피 법칙',
+        chipSaw: '1F 톱날 → 상단 베기 점프',
+        chipMine: '2F 기뢰 → 하단 베기 회피',
+        desc: '붉은 톱날·기뢰는 베지 말고 반대 층을 베어 피하세요! (빈 허공 베기는 감점이 전혀 없습니다)',
+      },
+      modes: {
+        step: 'STEP 04',
+        title: '입문 추천 모드 · 각성 · 20x 줌',
+        chipCasual: '★ 입문 추천: 캐주얼(무실패)',
+        chipBoost: '[Shift] 각성 · [Esc] 20x 줌',
+        chipBoostTouch: '각성 탭 · 핀치 20x 줌',
+        desc: '처음이라면 2단계 [캐주얼(무실패)] 모드로 시작해보세요! 100% 게이지 각성(2배 점수·체력 회복·함정 무적 분쇄)과 내 음원 추가도 지원합니다.',
+      },
+    },
   },
 };
 

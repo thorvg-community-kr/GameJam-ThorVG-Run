@@ -13,6 +13,7 @@ const RECORDS_STORAGE_KEY = 'thorvg_run:records:v2';
 const SFX_MODE_STORAGE_KEY = 'thorvg_run:sfx_mode:v1';
 const SELECTED_SKIN_KEY = 'thorvg_run:selected_skin:v1';
 const AUDIO_OFFSET_MS_KEY = 'thorvg_run:audio_offset_ms:v1';
+const GUIDE_DISMISSED_KEY = 'thorvg_run:guide_dismissed:v1';
 
 const RANK_WEIGHT: Record<ResultRank, number> = {
   S: 4,
@@ -181,4 +182,24 @@ export function saveSelectedSkin(skinId: CrewmateSkinId): CrewmateSkinId {
     // Ignore storage errors
   }
   return safeSkin;
+}
+
+export function loadGuideDismissed(): boolean {
+  try {
+    return window.localStorage.getItem(GUIDE_DISMISSED_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function saveGuideDismissed(dismissed: boolean): void {
+  try {
+    if (dismissed) {
+      window.localStorage.setItem(GUIDE_DISMISSED_KEY, '1');
+    } else {
+      window.localStorage.removeItem(GUIDE_DISMISSED_KEY);
+    }
+  } catch {
+    // Ignore storage errors
+  }
 }

@@ -23,6 +23,7 @@ import {
   type RendererMode,
   type TrackMetadata,
 } from '../types/game';
+import { BeginnerGuideModal } from './BeginnerGuideModal';
 import { MenuTooltipPortal, useMenuTooltip, type MenuTooltipData } from './MenuTooltip';
 import { HudVectorIcon, SkinVectorPreview } from './SkinVectorPreview';
 
@@ -36,6 +37,9 @@ interface StartScreenProps {
   selectedSkin: CrewmateSkinId;
   engineReady: boolean;
   step: MenuStep;
+  isGuideOpen: boolean;
+  onOpenGuide: () => void;
+  onCloseGuide: () => void;
   onStepChange: (step: MenuStep) => void;
   onSelectTrack: (track: TrackMetadata) => void;
   onUploadFile: (file: File, supportedFormats: readonly AudioFormat[]) => Promise<void>;
@@ -56,6 +60,9 @@ export const StartScreen: React.FC<StartScreenProps> = ({
   selectedSkin,
   engineReady,
   step,
+  isGuideOpen,
+  onOpenGuide,
+  onCloseGuide,
   onStepChange,
   onSelectTrack,
   onUploadFile,
@@ -83,6 +90,12 @@ export const StartScreen: React.FC<StartScreenProps> = ({
   useEffect(() => {
     hideTip();
   }, [step, lang, hideTip]);
+
+  useEffect(() => {
+    if (isGuideOpen) {
+      hideTip();
+    }
+  }, [isGuideOpen, hideTip]);
 
   // Formats this browser can decode. Drives the hint, the picker filter, and validation.
   const supportedFormats = useMemo(() => detectSupportedAudioFormats(), []);
@@ -321,6 +334,14 @@ export const StartScreen: React.FC<StartScreenProps> = ({
         </div>
 
         <div className="header-actions">
+          <button
+            type="button"
+            className="hero-guide-btn"
+            data-testid="menu-guide-btn"
+            onClick={onOpenGuide}
+          >
+            ? {t.menu.guideBtn}
+          </button>
           <div className="lang-toggle" role="group" aria-label={t.menu.language}>
             {LANGS.map((code) => (
               <button
@@ -742,16 +763,26 @@ export const StartScreen: React.FC<StartScreenProps> = ({
                   <div className="menu-controls-wrap">
                     <div className="controls-header-row">
                       <h3 className="controls-guide-title">{t.menu.controlsSectionTitle}</h3>
-                      <button
-                        type="button"
-                        className="menu-info-badge"
-                        data-testid="menu-resonance-info-btn"
-                        aria-label={t.menu.resonanceTipTitle}
-                        {...bindHoverTip(resonanceInfoTip)}
-                        onClick={(e) => toggleTouchTip(e, resonanceInfoTip)}
-                      >
-                        {t.menu.resonanceBadge}
-                      </button>
+                      <div className="controls-header-actions">
+                        <button
+                          type="button"
+                          className="menu-info-badge"
+                          data-testid="menu-controls-guide-btn"
+                          onClick={onOpenGuide}
+                        >
+                          ? {t.menu.guideBtn}
+                        </button>
+                        <button
+                          type="button"
+                          className="menu-info-badge"
+                          data-testid="menu-resonance-info-btn"
+                          aria-label={t.menu.resonanceTipTitle}
+                          {...bindHoverTip(resonanceInfoTip)}
+                          onClick={(e) => toggleTouchTip(e, resonanceInfoTip)}
+                        >
+                          {t.menu.resonanceBadge}
+                        </button>
+                      </div>
                     </div>
                     <div className="controls-pill-grid" data-testid="menu-controls-guide">
                       {controlPills.map((pill) => {
@@ -820,6 +851,7 @@ export const StartScreen: React.FC<StartScreenProps> = ({
         </div>
       </div>
       <MenuTooltipPortal activeTip={activeTip} hideTip={hideTip} />
+      <BeginnerGuideModal open={isGuideOpen} onClose={onCloseGuide} />
     </div>
   );
 };
