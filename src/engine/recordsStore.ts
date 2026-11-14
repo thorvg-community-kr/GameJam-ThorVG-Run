@@ -14,6 +14,7 @@ const SFX_MODE_STORAGE_KEY = 'thorvg_run:sfx_mode:v1';
 const SELECTED_SKIN_KEY = 'thorvg_run:selected_skin:v1';
 const AUDIO_OFFSET_MS_KEY = 'thorvg_run:audio_offset_ms:v1';
 const GUIDE_DISMISSED_KEY = 'thorvg_run:guide_dismissed:v1';
+const SELECTED_TRACK_KEY = 'thorvg_run:selected_track:v1';
 
 const RANK_WEIGHT: Record<ResultRank, number> = {
   S: 4,
@@ -199,6 +200,24 @@ export function saveGuideDismissed(dismissed: boolean): void {
     } else {
       window.localStorage.removeItem(GUIDE_DISMISSED_KEY);
     }
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+export function loadSelectedTrackId(): string | null {
+  try {
+    const raw = window.localStorage.getItem(SELECTED_TRACK_KEY);
+    return typeof raw === 'string' && raw.length > 0 ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveSelectedTrackId(trackId: string): void {
+  if (!trackId) return;
+  try {
+    window.localStorage.setItem(SELECTED_TRACK_KEY, trackId);
   } catch {
     // Ignore storage errors
   }

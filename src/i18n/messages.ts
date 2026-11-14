@@ -27,7 +27,6 @@ export const en = {
     title: 'ThorVG Run — 2-Lane Vector Rhythm Slasher',
   },
   menu: {
-    versionBadge: 'ThorVG WASM v1.1.3',
     subtitle: '2-Lane Vector Rhythm Action',
     introTipTitle: 'ThorVG Run v6.0',
     introTipBody:
@@ -175,8 +174,22 @@ export const en = {
     },
   },
   tracks: {
-    'mens-tear-ak47': 'Mens Tear - AK47',
-    defaultArtist: 'Mens Tear',
+    'mens-tear-ak47': {
+      title: 'Mens Tear - AK47',
+      artist: 'Mens Tear',
+    },
+    'day6-time-of-our-life': {
+      title: 'DAY6 - Time of Our Life',
+      artist: 'DAY6',
+    },
+    'daft-punk-hbfs': {
+      title: 'Daft Punk - Harder, Better, Faster, Stronger',
+      artist: 'Daft Punk',
+    },
+    'yoo-jeong-seok-jilpunggado': {
+      title: 'Yoo Jeong-seok - Jilpunggado',
+      artist: 'Yoo Jeong-seok',
+    },
     customArtist: 'Local',
   },
   forms: {
@@ -385,6 +398,18 @@ export const en = {
         desc: 'New here? Pick Casual (No-Fail) in Step 2! Trigger 100% Overdrive (2x Score · HP Heal · Hazard Smash) or drop in your own MP3.',
       },
     },
+    svg: {
+      highLane: '2F HIGH',
+      lowLane: '1F LOW',
+      dual: 'DUAL',
+      holdRibbon: 'HOLD RIBBON ━━▶',
+      safeJump: '✓ 2F JUMP',
+      safeDuck: '✓ 1F DUCK',
+      casualTitle: 'CASUAL',
+      casualSub: 'NO-FAIL HP',
+      overdrive: '⚡ OVERDRIVE 2X · HEAL',
+      zoom: 'ESC · 20x ZOOM',
+    },
   },
 };
 
@@ -395,7 +420,6 @@ export const ko: Messages = {
     title: 'ThorVG Run — 2-Lane 벡터 비트 난투 슬래셔',
   },
   menu: {
-    versionBadge: 'ThorVG WASM v1.1.3',
     subtitle: '2-Lane 벡터 리듬 액션',
     introTipTitle: 'ThorVG Run v6.0',
     introTipBody:
@@ -543,8 +567,22 @@ export const ko: Messages = {
     },
   },
   tracks: {
-    'mens-tear-ak47': '맨스티어_AK47',
-    defaultArtist: '맨스티어',
+    'mens-tear-ak47': {
+      title: '맨스티어 - AK47',
+      artist: '맨스티어',
+    },
+    'day6-time-of-our-life': {
+      title: 'DAY6 - 한 페이지가 될 수 있게',
+      artist: 'DAY6',
+    },
+    'daft-punk-hbfs': {
+      title: 'Daft Punk - Harder, Better, Faster, Stronger',
+      artist: 'Daft Punk',
+    },
+    'yoo-jeong-seok-jilpunggado': {
+      title: '유정석 - 질풍가도',
+      artist: '유정석',
+    },
     customArtist: '내 PC',
   },
   forms: {
@@ -713,45 +751,57 @@ export const ko: Messages = {
   },
   guide: {
     badge: '초보자 퀵 플레이 가이드',
-    title: '처음이어도 쉬운 10초 핵심 가이드',
+    title: '10초 만에 배우는 플레이 방법',
     subtitle:
-      '다가오는 비트를 좌측 판정 링 타이밍에 맞춰 상·하단으로 베어내세요 — 모든 참격이 순수 2D 벡터를 실시간 절단합니다.',
+      '좌측 판정 링 타이밍에 맞춰 상단·하단 노트를 베어내세요 — 모든 참격이 순수 2D 벡터를 실시간 절단합니다.',
     dismissLabel: '다음부터 자동으로 열지 않기',
     closeBtn: '이해했어요 · 시작 준비',
     closeAria: '플레이 가이드 닫기',
     cards: {
       slash: {
-        step: 'STEP 01',
+        step: '1단계',
         title: '2-Lane 상·하단 리듬 베기',
-        chipHigh: '2F [F·D·W / ↑ / 클릭]',
+        chipHigh: '2F [F·D·W / ↑ / 좌클릭]',
         chipHighTouch: '2F [상단 탭 / HIGH]',
         chipLow: '1F [J·K·S / ↓ / 우클릭]',
         chipLowTouch: '1F [하단 탭 / LOW]',
-        desc: '타겟이 좌측 판정 링에 닿는 순간, 청록 타겟은 상단(2F)·진홍 타겟은 하단(1F)으로 베어내세요.',
+        desc: '타겟이 좌측 판정 링에 들어오는 순간, 청록 노트는 상단(2F)·진홍 노트는 하단(1F)으로 베어내세요.',
       },
       chord: {
-        step: 'STEP 02',
+        step: '2단계',
         title: '황금 동시 베기 & 롱노트',
         chipChord: '동시 [Space / F+J]',
-        chipChordTouch: '동시 [양손 탭 / CROSS]',
-        chipHold: '롱노트 [끝까지 유지]',
-        desc: '황금 동시 타겟 전용([Space / F+J]만 판정, 일반 노트 불가)이며, 긴 리본 노트는 해당 레인 키를 끝까지 유지하세요.',
+        chipChordTouch: '동시 [양손 탭 / CROSS ⚡]',
+        chipHold: '롱노트 [끝까지 누르기]',
+        desc: '연결된 황금 동시 코어는 [Space / F+J] 전용이며, 긴 리본 노트는 꼬리가 끝날 때까지 누르고 계세요.',
       },
       dodge: {
-        step: 'STEP 03',
-        title: '붉은 톱날 · 기뢰 회피 법칙',
-        chipSaw: '1F 톱날 → 상단 베기 점프',
-        chipMine: '2F 기뢰 → 하단 베기 회피',
-        desc: '붉은 톱날·기뢰는 베지 말고 반대 층을 베어 피하세요! (빈 허공 베기는 감점이 전혀 없습니다)',
+        step: '3단계',
+        title: '붉은 톱날 · 기뢰 피하기',
+        chipSaw: '1F 톱날 → 2F 상단 점프 베기',
+        chipMine: '2F 기뢰 → 1F 하단 숙여 베기',
+        desc: '붉은 함정은 절대 베지 마세요! 반대 레인을 베어 땅의 톱날을 넘거나 하늘 기뢰를 피하세요(허공 베기 감점 0).',
       },
       modes: {
-        step: 'STEP 04',
-        title: '입문 추천 모드 · 각성 · 20x 줌',
+        step: '4단계',
+        title: '입문 캐주얼 · 각성 · 20x 줌',
         chipCasual: '★ 입문 추천: 캐주얼(무실패)',
         chipBoost: '[Shift] 각성 · [Esc] 20x 줌',
         chipBoostTouch: '각성 탭 · 핀치 20x 줌',
-        desc: '처음이라면 2단계 [캐주얼(무실패)] 모드로 시작해보세요! 100% 게이지 각성(2배 점수·체력 회복·함정 무적 분쇄)과 내 음원 추가도 지원합니다.',
+        desc: '처음이신가요? 2단계에서 캐주얼(무실패)을 고르세요! 100% 각성(2배 점수·체력 회복·함정 분쇄)과 내 MP3 추가도 지원합니다.',
       },
+    },
+    svg: {
+      highLane: '2F 상단',
+      lowLane: '1F 하단',
+      dual: '동시',
+      holdRibbon: '롱노트 ━━▶',
+      safeJump: '✓ 2F 점프',
+      safeDuck: '✓ 1F 회피',
+      casualTitle: '캐주얼',
+      casualSub: '무실패 HP',
+      overdrive: '⚡ 각성 2X · 회복',
+      zoom: 'ESC · 20x 줌',
     },
   },
 };

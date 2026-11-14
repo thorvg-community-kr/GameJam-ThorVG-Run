@@ -3,14 +3,18 @@ import { createPortal } from 'react-dom';
 import { loadGuideDismissed, saveGuideDismissed } from '../engine/recordsStore';
 import { useCoarsePointer } from '../hooks/useCoarsePointer';
 import { useI18n } from '../i18n/I18nProvider';
+import { LANGUAGE_LABELS, type Lang, type Messages } from '../i18n/messages';
+
+const LANGS: Lang[] = ['en', 'ko'];
 
 export type GuideDiagramKind = 'laneSlash' | 'chordHold' | 'hazardDodge' | 'modeOverdrive';
 
 interface GuideIllustrationProps {
   kind: GuideDiagramKind;
+  svg: Messages['guide']['svg'];
 }
 
-const GuideIllustration: React.FC<GuideIllustrationProps> = ({ kind }) => {
+const GuideIllustration: React.FC<GuideIllustrationProps> = ({ kind, svg }) => {
   return (
     <svg
       viewBox="0 0 280 88"
@@ -78,7 +82,7 @@ const GuideIllustration: React.FC<GuideIllustrationProps> = ({ kind }) => {
             strokeWidth="1.4"
           />
           <text x="180" y="29" fill="#8CEEFF" fontSize="9.5" fontWeight="800" fontFamily="monospace">
-            2F HIGH
+            {svg.highLane}
           </text>
 
           {/* Incoming 1F Crimson Hex Core */}
@@ -91,8 +95,8 @@ const GuideIllustration: React.FC<GuideIllustrationProps> = ({ kind }) => {
             strokeWidth="1.4"
           />
           <circle cx="206" cy="62" r="3.5" fill="#FFF0F5" />
-          <text x="225" y="65" fill="#FF98B8" fontSize="9.5" fontWeight="800" fontFamily="monospace">
-            1F LOW
+          <text x="220" y="65" fill="#FF98B8" fontSize="9.5" fontWeight="800" fontFamily="monospace">
+            {svg.lowLane}
           </text>
         </g>
       )}
@@ -111,7 +115,7 @@ const GuideIllustration: React.FC<GuideIllustrationProps> = ({ kind }) => {
           <line x1="42" y1="14" x2="86" y2="72" stroke="#FFFFFF" strokeWidth="2.2" strokeLinecap="round" />
           <line x1="86" y1="14" x2="42" y2="72" stroke="#FFE600" strokeWidth="2" strokeLinecap="round" />
           <text x="20" y="46" fill="#FFE600" fontSize="9" fontWeight="900" fontFamily="monospace">
-            DUAL
+            {svg.dual}
           </text>
 
           {/* Divider */}
@@ -132,8 +136,8 @@ const GuideIllustration: React.FC<GuideIllustrationProps> = ({ kind }) => {
           <line x1="154" y1="44" x2="242" y2="44" stroke="#BDF8FF" strokeWidth="2.6" strokeLinecap="round" />
           <circle cx="144" cy="44" r="10" fill="#05D5FF" stroke="#FFFFFF" strokeWidth="1.6" />
           <circle cx="252" cy="44" r="7" fill="#34D399" stroke="#E6FFF5" strokeWidth="1.4" />
-          <text x="164" y="27" fill="#9BF2FF" fontSize="9.5" fontWeight="800" fontFamily="monospace">
-            HOLD RIBBON ━━▶
+          <text x="156" y="27" fill="#9BF2FF" fontSize="9.5" fontWeight="800" fontFamily="monospace">
+            {svg.holdRibbon}
           </text>
         </g>
       )}
@@ -159,7 +163,7 @@ const GuideIllustration: React.FC<GuideIllustrationProps> = ({ kind }) => {
           />
           <polygon points="131,25 122,20 124,29" fill="#05D5FF" />
           <text x="54" y="21" fill="#7CF3FF" fontSize="9" fontWeight="800" fontFamily="monospace">
-            ✓ 2F JUMP
+            {svg.safeJump}
           </text>
 
           {/* Right: 2F Sky Mine + 1F Safe Duck Arc */}
@@ -181,7 +185,7 @@ const GuideIllustration: React.FC<GuideIllustrationProps> = ({ kind }) => {
           />
           <polygon points="255,59 246,56 248,65" fill="#34D399" />
           <text x="180" y="72" fill="#74F2C0" fontSize="9" fontWeight="800" fontFamily="monospace">
-            ✓ 1F DUCK
+            {svg.safeDuck}
           </text>
         </g>
       )}
@@ -217,10 +221,10 @@ const GuideIllustration: React.FC<GuideIllustrationProps> = ({ kind }) => {
             strokeLinejoin="round"
           />
           <text x="54" y="38" fill="#74FFD0" fontSize="9.5" fontWeight="900" fontFamily="monospace">
-            CASUAL
+            {svg.casualTitle}
           </text>
           <text x="54" y="51" fill="#D9FFF2" fontSize="8.5" fontWeight="700" fontFamily="monospace">
-            NO-FAIL HP
+            {svg.casualSub}
           </text>
 
           {/* Top-Right Box: 100% Overdrive Bar */}
@@ -237,7 +241,7 @@ const GuideIllustration: React.FC<GuideIllustrationProps> = ({ kind }) => {
             strokeWidth="1.3"
           />
           <text x="142" y="24" fill="#FFE600" fontSize="8.5" fontWeight="900" fontFamily="monospace">
-            ⚡ OVERDRIVE 2X · HEAL
+            {svg.overdrive}
           </text>
           <rect x="142" y="29" width="118" height="6" rx="3" fill="#1C2742" />
           <rect x="142" y="29" width="118" height="6" rx="3" fill="#FFE600" />
@@ -258,7 +262,7 @@ const GuideIllustration: React.FC<GuideIllustrationProps> = ({ kind }) => {
           <circle cx="151" cy="61" r="7" fill="none" stroke="#05D5FF" strokeWidth="1.8" />
           <line x1="156" y1="66" x2="162" y2="72" stroke="#05D5FF" strokeWidth="2" strokeLinecap="round" />
           <text x="169" y="64" fill="#B8F6FF" fontSize="9" fontWeight="800" fontFamily="monospace">
-            ESC · 20x ZOOM
+            {svg.zoom}
           </text>
         </g>
       )}
@@ -272,10 +276,12 @@ interface BeginnerGuideModalProps {
 }
 
 export const BeginnerGuideModal: React.FC<BeginnerGuideModalProps> = ({ open, onClose }) => {
-  const { t } = useI18n();
+  const { lang, setLang, t } = useI18n();
   const isCoarsePointer = useCoarsePointer();
   const modalRef = useRef<HTMLDivElement | null>(null);
   const closeBtnRef = useRef<HTMLButtonElement | null>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   const [dismissChecked, setDismissChecked] = useState<boolean>(() => loadGuideDismissed());
 
   useEffect(() => {
@@ -291,7 +297,7 @@ export const BeginnerGuideModal: React.FC<BeginnerGuideModalProps> = ({ open, on
       if (e.key === 'Escape') {
         e.preventDefault();
         e.stopPropagation();
-        onClose();
+        onCloseRef.current();
         return;
       }
 
@@ -321,7 +327,7 @@ export const BeginnerGuideModal: React.FC<BeginnerGuideModalProps> = ({ open, on
         prevFocused.focus({ preventScroll: true });
       }
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open || typeof document === 'undefined') {
     return null;
@@ -409,15 +415,37 @@ export const BeginnerGuideModal: React.FC<BeginnerGuideModalProps> = ({ open, on
               </h2>
               <p className="guide-modal-subtitle">{t.guide.subtitle}</p>
             </div>
-            <button
-              type="button"
-              className="guide-icon-close-btn"
-              data-testid="guide-close-icon-btn"
-              aria-label={t.guide.closeAria}
-              onClick={onClose}
-            >
-              ✕
-            </button>
+            <div className="guide-modal-header-actions">
+              <div
+                className="lang-toggle"
+                role="group"
+                aria-label={t.menu.language}
+                data-testid="guide-lang-toggle"
+              >
+                {LANGS.map((code) => (
+                  <button
+                    key={code}
+                    type="button"
+                    lang={code}
+                    className={`lang-btn ${lang === code ? 'active' : ''}`}
+                    data-testid={`guide-lang-btn-${code}`}
+                    aria-pressed={lang === code}
+                    onClick={() => setLang(code)}
+                  >
+                    {LANGUAGE_LABELS[code]}
+                  </button>
+                ))}
+              </div>
+              <button
+                type="button"
+                className="guide-icon-close-btn"
+                data-testid="guide-close-icon-btn"
+                aria-label={t.guide.closeAria}
+                onClick={onClose}
+              >
+                ✕
+              </button>
+            </div>
           </header>
 
           <div className="guide-modal-body" data-testid="guide-modal-body">
@@ -432,7 +460,7 @@ export const BeginnerGuideModal: React.FC<BeginnerGuideModalProps> = ({ open, on
                     <span className="guide-step-pill">{card.step}</span>
                     <strong className="guide-card-title">{card.title}</strong>
                   </div>
-                  <GuideIllustration kind={card.id} />
+                  <GuideIllustration kind={card.id} svg={t.guide.svg} />
                   <div className="guide-chip-row">
                     {card.chips.map((chip) => (
                       <span key={chip.text} className={`guide-key-chip chip-${chip.tone}`}>

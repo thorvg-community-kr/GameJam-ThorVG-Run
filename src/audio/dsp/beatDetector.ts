@@ -100,6 +100,7 @@ export interface DetectedBeatEvent {
   hatStrength: number;
   sustainSec: number;
   isDownbeat: boolean;
+  centroidNorm: number;
   band: ResonanceFormType;
   intensity: SectionIntensity;
 }
@@ -331,6 +332,10 @@ export async function extractAudioSlicesAndBeats(
   const frameLowE = new Float32Array(numFrames);
   const frameMidE = new Float32Array(numFrames);
   const frameHighE = new Float32Array(numFrames);
+  const frameCentroid = new Float32Array(numFrames);
+
+  const LOG_CENTROID_MIN = Math.log2(80);
+  const INV_LOG_CENTROID_SPAN = 1 / (Math.log2(8000) - LOG_CENTROID_MIN);
 
   const { hann } = FFT_TABLES;
   const invSqrtN = 1 / Math.sqrt(FFT_SIZE); // 1/32 unitary FFT normalization
@@ -353,10 +358,19 @@ export async function extractAudioSlicesAndBeats(
     let sumVisLow = 0;
     let sumVisMid = 0;
     let sumVisHigh = 0;
+    let sumCentroidPower = 0;
+    let sumCentroidWeightedLog = 0;
 
     for (let b = 1; b < HALF_FFT; b++) {
       const mag = Math.hypot(re[b]!, im[b]!) * invSqrtN;
       curLogSpec[b] = Math.log(1 + 40 * mag);
+
+      const freqHz = b * binHz;
+      if (freqHz >= 80 && freqHz <= 8000) {
+        const power = mag * mag;
+        sumCentroidPower += power;
+        sumCentroidWeightedLog += power * Math.log2(freqHz);
+      }
 
       if (b >= vLow0 && b <= vLow1) sumVisLow += mag;
       else if (b >= vMid0 && b <= vMid1) sumVisMid += mag;
@@ -366,6 +380,17 @@ export async function extractAudioSlicesAndBeats(
     frameLowE[f] = sumVisLow / Math.max(1, vLow1 - vLow0 + 1);
     frameMidE[f] = sumVisMid / Math.max(1, vMid1 - vMid0 + 1);
     frameHighE[f] = sumVisHigh / Math.max(1, vHigh1 - vHigh0 + 1);
+    frameCentroid[f] =
+      sumCentroidPower > 1e-12
+        ? Math.max(
+            0,
+            Math.min(
+              1,
+              (sumCentroidWeightedLog / sumCentroidPower - LOG_CENTROID_MIN) *
+                INV_LOG_CENTROID_SPAN
+            )
+          )
+        : 0.5;
 
     // 3-bin frequency max-filter for vibrato/808 pitch-slide suppression
     for (let b = 1; b < HALF_FFT; b++) {
@@ -447,6 +472,7 @@ export async function extractAudioSlicesAndBeats(
   const nOverallE = new Float32Array(numFrames);
 
   const combinedFlux = new Float32Array(numFrames);
+  const onsetFlux = new Float32Array(numFrames);
   const pulseEnv = new Float32Array(numFrames);
 
   for (let f = 0; f < numFrames; f++) {
@@ -460,8 +486,11 @@ export async function extractAudioSlicesAndBeats(
     nMidHigh[f] = Math.min(1.0, mh);
     nHat[f] = Math.min(1.0, h);
 
-    // Balanced multi-band onset function so rap syllables/snares & hi-hats cut through heavy 808 bass
-    combinedFlux[f] = k * 0.34 + lm * 0.16 + mh * 0.34 + h * 0.16;
+    // Balanced multi-band onset + dominant-band salience so solo vocal/guitar/snare transients stand out clearly
+    const baseFlux = k * 0.34 + lm * 0.16 + mh * 0.34 + h * 0.16;
+    const domBand = Math.max(k * 0.92, lm * 0.85, mh * 1.0, h * 0.82);
+    combinedFlux[f] = baseFlux;
+    onsetFlux[f] = baseFlux * 0.55 + domBand * 0.45;
     pulseEnv[f] = k * 0.48 + lm * 0.18 + mh * 0.26 + h * 0.08;
 
     const le = Math.min(1.0, frameLowE[f]! / lowEDenom);
@@ -545,9 +574,10 @@ export async function extractAudioSlicesAndBeats(
     sectionCounts[inten]++;
   }
 
-  // Sliding Median/MAD adaptive thresholding + parabolic peak + hybrid grid soft-snap
+  // Section- & tempo-aware sliding Median/MAD thresholding + parabolic peak + subtle micro-timing polish
+  const isCasual = tuning.minBeatGapSec >= 0.24;
   const madMult = tuning.madMultiplier ?? 1.05;
-  const windowCenterOffsetSec = (FFT_SIZE * 0.5) / sampleRate;
+  const onsetEdgeOffsetSec = (FFT_SIZE * 0.25) / sampleRate;
   const beatEvents: DetectedBeatEvent[] = [];
   const sliceHasBeat = new Set<number>();
   let lastAcceptedSec = -tuning.minBeatGapSec;
@@ -556,18 +586,32 @@ export async function extractAudioSlicesAndBeats(
   const absDevBuf: number[] = [];
 
   for (let f = 2; f < numFrames - 2; f++) {
-    const y1 = combinedFlux[f]!;
-    if (y1 <= 0 || y1 < tuning.fluxGate) continue;
-    const y0 = combinedFlux[f - 1]!;
-    const y2 = combinedFlux[f + 1]!;
+    const y1 = onsetFlux[f]!;
+    if (y1 <= 0 || y1 < tuning.fluxGate * 0.85) continue;
+
+    const fSlice = Math.min(
+      totalSlices - 1,
+      Math.max(0, Math.floor((f * hopSec) / SLICE_DURATION_SEC))
+    );
+    const secInten = sliceIntensity[fSlice] ?? 'groove';
+    const effectiveFluxGate =
+      secInten === 'calm'
+        ? tuning.fluxGate * 1.18
+        : secInten === 'drop'
+          ? tuning.fluxGate * 0.88
+          : tuning.fluxGate;
+    if (y1 < effectiveFluxGate) continue;
+
+    const y0 = onsetFlux[f - 1]!;
+    const y2 = onsetFlux[f + 1]!;
     if (y1 < y0 || y1 <= y2) continue;
 
-    // [Fix 5] Strictly clamped sliding Median/MAD window [max(0, f-50), min(numFrames-1, f+50)]
+    // Strictly clamped sliding Median/MAD window [max(0, f-50), min(numFrames-1, f+50)]
     const w0 = Math.max(0, f - 50);
     const w1 = Math.min(numFrames - 1, f + 50);
     windowBuf.length = 0;
     for (let w = w0; w <= w1; w++) {
-      windowBuf.push(combinedFlux[w]!);
+      windowBuf.push(onsetFlux[w]!);
     }
     windowBuf.sort((a, b) => a - b);
     const med = medianOfSorted(windowBuf);
@@ -579,18 +623,25 @@ export async function extractAudioSlicesAndBeats(
     absDevBuf.sort((a, b) => a - b);
     const mad = medianOfSorted(absDevBuf);
 
-    const adaptiveThreshold = med + madMult * Math.max(mad * 1.4826, 0.014) + tuning.fluxGate;
+    const effectiveMadMult =
+      secInten === 'calm'
+        ? madMult * 1.12
+        : secInten === 'drop'
+          ? madMult * 0.88
+          : madMult;
+    const adaptiveThreshold =
+      med + effectiveMadMult * Math.max(mad * 1.4826, 0.014) + effectiveFluxGate;
     if (y1 < adaptiveThreshold) continue;
 
-    // 3-point parabolic sub-frame peak interpolation
+    // 3-point parabolic sub-frame peak interpolation aligned to true attack edge
     const denom = y0 - 2 * y1 + y2;
     const subFrameDelta =
       Math.abs(denom) > 1e-7
         ? Math.max(-0.5, Math.min(0.5, (0.5 * (y0 - y2)) / denom))
         : 0;
-    const rawTimeSec = Math.max(0, (f + subFrameDelta) * hopSec + windowCenterOffsetSec);
+    const rawTimeSec = Math.max(0, (f + subFrameDelta) * hopSec + onsetEdgeOffsetSec);
 
-    // Hybrid 1/4 (16th) & 1/3 (triplet) beat-grid soft-snap (<= 28ms -> 75% blend)
+    // Gentle micro-timing jitter polish (<= 12ms -> 20% blend) preserving natural acoustic groove
     const gridQuarter =
       beatPhaseSec + Math.round((rawTimeSec - beatPhaseSec) / stepQuarter) * stepQuarter;
     const gridTriplet =
@@ -601,20 +652,38 @@ export async function extractAudioSlicesAndBeats(
         : gridTriplet;
     const gridErr = Math.abs(rawTimeSec - nearestGrid);
     const snappedTimeSec =
-      gridErr <= 0.028 ? rawTimeSec * 0.25 + nearestGrid * 0.75 : rawTimeSec;
+      gridErr <= 0.012 ? rawTimeSec * 0.8 + nearestGrid * 0.2 : rawTimeSec;
+
+    const effectiveMinGap =
+      secInten === 'calm'
+        ? tuning.minBeatGapSec * 1.25
+        : secInten === 'drop'
+          ? isCasual
+            ? Math.max(tuning.minBeatGapSec * 0.9, beatSec * 0.48)
+            : Math.max(0.115, Math.min(tuning.minBeatGapSec * 0.85, beatSec * 0.44))
+          : isCasual
+            ? tuning.minBeatGapSec
+            : Math.min(tuning.minBeatGapSec, beatSec * 0.46);
 
     if (snappedTimeSec <= 0.05 || snappedTimeSec >= durationSec - 0.08) continue;
-    if (snappedTimeSec - lastAcceptedSec < tuning.minBeatGapSec) {
+    if (snappedTimeSec - lastAcceptedSec < effectiveMinGap) {
       // If significantly stronger than the immediately preceding onset within the gap, upgrade it
       const prev = beatEvents[beatEvents.length - 1];
       if (prev && y1 > prev.strength * 1.35 && snappedTimeSec - prev.timeSec < 0.065) {
         prev.timeSec = Number(snappedTimeSec.toFixed(4));
         prev.worldX = prev.timeSec * worldPxPerSec;
-        prev.strength = Math.min(1.0, y1);
+        prev.strength = Math.min(1.0, y1 * 0.82 + nOverallE[f]! * 0.28);
         prev.kickStrength = nKick[f]!;
         prev.lowMidStrength = nLowMid[f]!;
         prev.midHighStrength = nMidHigh[f]!;
         prev.hatStrength = nHat[f]!;
+        prev.centroidNorm = frameCentroid[f]!;
+        prev.band = dominantBandOf(
+          nKick[f]! * 0.75 + nLowE[f]! * 0.25,
+          nMidHigh[f]! * 0.7 + nMidE[f]! * 0.3,
+          nHat[f]! * 0.75 + nHighE[f]! * 0.25
+        );
+        prev.intensity = secInten;
         lastAcceptedSec = prev.timeSec;
       }
       continue;
@@ -625,15 +694,29 @@ export async function extractAudioSlicesAndBeats(
     const sIdx = Math.min(totalSlices - 1, Math.max(0, Math.floor(timeSec / SLICE_DURATION_SEC)));
     sliceHasBeat.add(sIdx);
 
-    // Estimate sustain length (how long overall energy stays >= 62% of attack energy, up to 1.2s)
+    // Estimate true tonal sustain length (gated on tonal continuity & stopped on re-attacks)
     const maxSustainFrames = Math.min(numFrames - 1 - f, Math.round(1.2 / hopSec));
-    const attackEnergy = Math.max(0.18, nOverallE[f]!);
+    const tonalEnergy = Math.max(nLowE[f]! * 0.85, nMidE[f]!);
+    const attackEnergy = Math.max(0.22, tonalEnergy);
+    const tonalRatio =
+      (nLowE[f]! * 0.8 + nMidE[f]! * 0.9) /
+      Math.max(0.15, nLowE[f]! + nMidE[f]! + nHighE[f]!);
     let sustainFrames = 0;
-    for (let sf = 1; sf <= maxSustainFrames; sf++) {
-      if (nOverallE[f + sf]! >= attackEnergy * 0.62) {
+    if (tonalRatio >= 0.44) {
+      for (let sf = 1; sf <= maxSustainFrames; sf++) {
+        const idx = f + sf;
+        const curTonal = Math.max(nLowE[idx]! * 0.85, nMidE[idx]!);
+        if (curTonal < attackEnergy * 0.58) {
+          break;
+        }
+        const majorReattack =
+          sf >= 5 &&
+          onsetFlux[idx]! >= Math.max(tuning.fluxGate * 1.55, y1 * 0.65) &&
+          Math.max(nKick[idx]!, nMidHigh[idx]!) >= 0.42;
+        if (majorReattack) {
+          break;
+        }
         sustainFrames = sf;
-      } else {
-        break;
       }
     }
     const sustainSec = sustainFrames * hopSec;
@@ -658,6 +741,7 @@ export async function extractAudioSlicesAndBeats(
       hatStrength: nHat[f]!,
       sustainSec,
       isDownbeat,
+      centroidNorm: frameCentroid[f]!,
       band,
       intensity: sliceIntensity[sIdx] ?? 'groove',
     });

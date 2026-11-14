@@ -195,6 +195,7 @@ function ensureMinimumBeatEvents(
       hatStrength: isHigh ? 0.58 : 0.18,
       sustainSec: 0.12,
       isDownbeat: isAccent,
+      centroidNorm: isHigh ? 0.68 : 0.32,
       band,
       intensity: dsp.sliceIntensity[sIdx] ?? 'groove',
     });
@@ -218,6 +219,7 @@ function ensureMinimumBeatEvents(
       hatStrength: isHigh ? 0.55 : 0.18,
       sustainSec: 0.1,
       isDownbeat: filtered.length % 4 === 0,
+      centroidNorm: isHigh ? 0.68 : 0.32,
       band: isHigh ? 'synth' : 'bass',
       intensity: 'groove',
     });
@@ -227,10 +229,22 @@ function ensureMinimumBeatEvents(
   return filtered;
 }
 
-function naturalLaneForEvent(ev: DetectedBeatEvent): SlashLane {
-  const highScore = ev.midHighStrength * 0.95 + ev.hatStrength * 1.1;
-  const lowScore = ev.kickStrength * 1.05 + ev.lowMidStrength * 0.75;
-  return highScore > lowScore ? 'high' : 'low';
+function naturalLaneForEvent(ev: DetectedBeatEvent, prevCentroid?: number): SlashLane {
+  const bandDiff =
+    ev.midHighStrength * 0.9 +
+    ev.hatStrength * 0.95 -
+    (ev.kickStrength * 1.0 + ev.lowMidStrength * 0.7);
+  // Blend spectral pitch height & melodic contour (ascents -> 2F HIGH, descents -> 1F LOW)
+  const pitchBias = (ev.centroidNorm - 0.5) * 0.85;
+  const contourBias =
+    prevCentroid !== undefined
+      ? ev.centroidNorm - prevCentroid >= 0.045
+        ? 0.22
+        : ev.centroidNorm - prevCentroid <= -0.045
+          ? -0.22
+          : 0
+      : 0;
+  return bandDiff + pitchBias + contourBias > 0.02 ? 'high' : 'low';
 }
 
 function isSlashTargetKind(kind: BeatTarget['kind']): boolean {
@@ -258,7 +272,7 @@ export async function analyzeTrackBlueprint(
   const tuning = DIFFICULTY_COURSE_TUNING[difficulty];
   const worldPxPerSec = diffCfg.worldPxPerSec;
   const segWidth = worldPxPerSec * SLICE_DURATION_SEC;
-  const cacheKey = `${track.id}:${difficulty}:v7`;
+  const cacheKey = `${track.id}:${difficulty}:v8`;
 
   const cached = blueprintCache.get(cacheKey);
   if (cached) {
@@ -290,7 +304,7 @@ export async function analyzeTrackBlueprint(
     minTargetSec + 0.4,
     Math.min(dsp.durationSec - 0.18, rawMaxTargetSec)
   );
-  const minRequiredSlashTargets = Math.max(9, Math.floor(dsp.durationSec * 1.6));
+  const minRequiredSlashTargets = Math.max(9, Math.floor(dsp.durationSec * 0.42));
 
   const events = ensureMinimumBeatEvents(
     dsp.beatEvents,
@@ -354,23 +368,42 @@ export async function analyzeTrackBlueprint(
     }
   }
 
-  // 2. Place Sustained 'hold' Laser Ribbons on tracks >= 12s (preserving >= minRequiredSlashTargets)
+  // 2. Place Sustained 'hold' Laser Ribbons strictly from genuine sustained tonal notes (before next strong beat)
   if (dsp.durationSec >= 12.0) {
     let lastHoldEndSec = -tuning.holdMinGapSec;
-    let holdLaneToggle: SlashLane = 'low';
     for (let i = 0; i < events.length; i++) {
       if (consumedIdx.has(i)) continue;
       const ev = events[i]!;
       if (ev.timeSec < 2.2 || ev.timeSec > maxTargetSec - 1.4) continue;
       if (ev.timeSec - lastHoldEndSec < tuning.holdMinGapSec) continue;
-      if (ev.sustainSec < 0.26 && !(ev.intensity !== 'drop' && ev.isDownbeat && ev.strength >= 0.58)) {
+      if (ev.sustainSec < 0.3) {
         continue;
       }
 
-      const rawHoldDur = Math.max(0.45, Math.min(0.95, Math.max(ev.sustainSec * 1.35, beatSec)));
-      const snappedHoldDur = Math.max(0.42, Math.round(rawHoldDur / (beatSec * 0.5)) * (beatSec * 0.5));
-      const endSec = Number(Math.min(maxTargetSec - 0.2, ev.timeSec + snappedHoldDur).toFixed(4));
-      if (endSec - ev.timeSec < 0.4) continue;
+      let nextClimaxSec: number | undefined;
+      for (let k = i + 1; k < events.length; k++) {
+        const cand = events[k]!;
+        if (cand.timeSec > ev.timeSec + 1.05) break;
+        if (
+          !consumedIdx.has(k) &&
+          cand.isDownbeat &&
+          cand.strength >= 0.84 &&
+          cand.timeSec >= ev.timeSec + 0.46
+        ) {
+          nextClimaxSec = cand.timeSec;
+          break;
+        }
+      }
+      const maxSafeEndSec =
+        nextClimaxSec !== undefined ? nextClimaxSec - 0.11 : maxTargetSec - 0.2;
+
+      const rawHoldDur = Math.max(0.38, Math.min(0.88, Math.max(ev.sustainSec * 1.15, beatSec)));
+      const gridHalfBeat = Math.max(0.16, beatSec * 0.5);
+      const snappedHoldDur = Math.max(0.38, Math.round(rawHoldDur / gridHalfBeat) * gridHalfBeat);
+      const endSec = Number(
+        Math.min(maxTargetSec - 0.2, maxSafeEndSec, ev.timeSec + snappedHoldDur).toFixed(4)
+      );
+      if (endSec - ev.timeSec < 0.36) continue;
 
       // Ensure hold span does not collide with an already-placed rush target
       const hitsExistingSpan = targets.some(
@@ -384,12 +417,13 @@ export async function analyzeTrackBlueprint(
       for (let j = i; j < events.length; j++) {
         if (consumedIdx.has(j)) continue;
         const tj = events[j]!.timeSec;
-        if (tj >= ev.timeSec - 0.02 && tj <= endSec + 0.16) {
+        if (tj >= ev.timeSec - 0.02 && tj <= endSec + 0.11) {
           absorbed.push(j);
-        } else if (tj > endSec + 0.16) {
+        } else if (tj > endSec + 0.11) {
           break;
         }
       }
+      if (absorbed.length > 4) continue;
       if (
         targets.length + (events.length - consumedIdx.size - absorbed.length) + 1 <
         minRequiredSlashTargets
@@ -399,9 +433,7 @@ export async function analyzeTrackBlueprint(
 
       for (const idx of absorbed) consumedIdx.add(idx);
       lastHoldEndSec = endSec;
-      const lane: SlashLane =
-        ev.sustainSec >= 0.35 ? naturalLaneForEvent(ev) : holdLaneToggle;
-      holdLaneToggle = lane === 'low' ? 'high' : 'low';
+      const lane: SlashLane = naturalLaneForEvent(ev);
 
       targets.push({
         id: 0,
@@ -419,11 +451,12 @@ export async function analyzeTrackBlueprint(
     }
   }
 
-  // 3. Place 'chord' Gold Shield Cores & 'high'/'low' Slash Cores with rapid (<0.19s) lane alternation
+  // 3. Place 'chord' Gold Shield Cores & 'high'/'low' Slash Cores following pitch contour + spectral energy
   let lastChordSec = -tuning.chordMinGapSec;
   let prevSlashSec = -10;
   let prevLane: SlashLane = 'high';
   let sameLaneStreak = 0;
+  let prevCentroid: number | undefined;
 
   for (let i = 0; i < events.length; i++) {
     if (consumedIdx.has(i)) continue;
@@ -433,13 +466,17 @@ export async function analyzeTrackBlueprint(
     const isChordCandidate =
       dtFromPrev >= 0.24 &&
       ev.timeSec - lastChordSec >= tuning.chordMinGapSec &&
-      ((ev.isDownbeat && ev.strength >= 0.62) ||
-        (ev.kickStrength >= 0.52 && ev.midHighStrength >= 0.48));
+      ((ev.kickStrength >= 0.54 && ev.midHighStrength >= 0.5) ||
+        (ev.isDownbeat &&
+          ev.strength >= 0.72 &&
+          ev.kickStrength >= 0.42 &&
+          ev.midHighStrength >= 0.38));
 
     if (isChordCandidate) {
       lastChordSec = ev.timeSec;
       prevSlashSec = ev.timeSec;
       sameLaneStreak = 0;
+      prevCentroid = ev.centroidNorm;
       targets.push({
         id: 0,
         kind: 'chord',
@@ -454,9 +491,9 @@ export async function analyzeTrackBlueprint(
       continue;
     }
 
-    let lane: SlashLane = naturalLaneForEvent(ev);
-    // Mandatory rapid katana flow: consecutive notes < 0.19s MUST alternate LOW <-> HIGH
-    if (dtFromPrev < 0.19) {
+    let lane: SlashLane = naturalLaneForEvent(ev, prevCentroid);
+    // Flip lane only on rapid (<0.165s) 16th-note bursts or >3 consecutive same-lane hits
+    if (dtFromPrev < 0.165) {
       lane = prevLane === 'low' ? 'high' : 'low';
     } else if (lane === prevLane && sameLaneStreak >= 3) {
       lane = prevLane === 'low' ? 'high' : 'low';
@@ -469,6 +506,7 @@ export async function analyzeTrackBlueprint(
     }
     prevLane = lane;
     prevSlashSec = ev.timeSec;
+    prevCentroid = ev.centroidNorm;
 
     targets.push({
       id: 0,

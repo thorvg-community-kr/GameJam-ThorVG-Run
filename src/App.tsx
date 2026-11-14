@@ -13,8 +13,10 @@ import {
   loadAudioOffsetMs,
   loadGuideDismissed,
   loadSelectedSkin,
+  loadSelectedTrackId,
   saveAudioOffsetMs,
   saveSelectedSkin,
+  saveSelectedTrackId,
 } from './engine/recordsStore';
 import { trackTitle } from './i18n/display';
 import { useI18n } from './i18n/I18nProvider';
@@ -92,7 +94,18 @@ type Screen = 'splash' | 'menu' | 'loading' | 'game';
 export const App: React.FC = () => {
   const { t } = useI18n();
   const [rendererMode, setRendererMode] = useState<RendererMode>('sw');
-  const [selectedTrack, setSelectedTrack] = useState<TrackMetadata>(BUILT_IN_TRACKS[0]!);
+  const [selectedTrack, setSelectedTrack] = useState<TrackMetadata>(() => {
+    const savedId = loadSelectedTrackId();
+    return BUILT_IN_TRACKS.find((track) => track.id === savedId) ?? BUILT_IN_TRACKS[0]!;
+  });
+  const handleSelectTrack = useCallback((track: TrackMetadata) => {
+    setSelectedTrack(track);
+    if (!track.isCustom) {
+      saveSelectedTrackId(track.id);
+    }
+  }, []);
+  const handleOpenGuide = useCallback(() => setIsGuideOpen(true), []);
+  const handleCloseGuide = useCallback(() => setIsGuideOpen(false), []);
   const [customTracks, setCustomTracks] = useState<TrackMetadata[]>([]);
   const [cinematicCamera, setCinematicCamera] = useState<boolean>(() => loadInitialCinematic());
   const [difficulty, setDifficulty] = useState<DifficultyMode>('standard');
@@ -546,10 +559,10 @@ export const App: React.FC = () => {
           engineReady={engineReady}
           step={menuStep}
           isGuideOpen={isGuideOpen}
-          onOpenGuide={() => setIsGuideOpen(true)}
-          onCloseGuide={() => setIsGuideOpen(false)}
+          onOpenGuide={handleOpenGuide}
+          onCloseGuide={handleCloseGuide}
           onStepChange={setMenuStep}
-          onSelectTrack={setSelectedTrack}
+          onSelectTrack={handleSelectTrack}
           onUploadFile={handleUploadFile}
           onSelectRenderer={setRendererMode}
           onSelectDifficulty={handleSelectDifficulty}

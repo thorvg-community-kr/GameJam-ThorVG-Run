@@ -306,15 +306,6 @@ export const StartScreen: React.FC<StartScreenProps> = ({
       {/* Top Cyberpunk Arcade Hero HUD Bar */}
       <header className="hero-top-bar" data-testid="hero-top-bar">
         <div className="hero-brand-cluster">
-          <div className="hero-eyebrow-row">
-            <span className="badge-version">{t.menu.versionBadge}</span>
-            <span
-              className={`hero-engine-chip ${rendererMode === 'gl' ? 'is-gpu' : 'is-cpu'}`}
-              aria-hidden="true"
-            >
-              {rendererMode === 'sw' ? 'SWCANVAS' : 'GLCANVAS'}
-            </span>
-          </div>
           <div className="hero-title-row">
             <h1 className="title-logo">
               THORVG <span className="title-logo-accent">RUN</span>
