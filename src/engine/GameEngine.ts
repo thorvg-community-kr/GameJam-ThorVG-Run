@@ -89,6 +89,8 @@ export class GameEngine {
   private playerLane: SlashLane = 'low';
   private highAirHangTimer: number = 0;
   private chordPoseTimer: number = 0;
+  private chordSafeTimer: number = 0;
+  private airChordExposeTimer: number = 0;
   private playerY: number = 520;
   private playerRotation: number = 0;
   private readonly playerRadius: number = 22;
@@ -520,6 +522,9 @@ export class GameEngine {
     this.highKeyFlashTimer = 0;
     this.lowKeyFlashTimer = 0;
     this.chordKeyFlashTimer = 0;
+    this.chordPoseTimer = 0;
+    this.chordSafeTimer = 0;
+    this.airChordExposeTimer = 0;
     this.hitstopTimer = 0;
     this.hitstopCooldownTimer = 0;
     this.prevRenderCameraX = this.cameraX;
@@ -955,6 +960,8 @@ export class GameEngine {
     this.playerLane = 'low';
     this.highAirHangTimer = 0;
     this.chordPoseTimer = 0;
+    this.chordSafeTimer = 0;
+    this.airChordExposeTimer = 0;
     this.playerY = this.terrain.getLaneLowScreenY();
     this.hitstopFreezePlayerY = this.playerY;
     this.hitstopFreezeRunCycle = 0;
@@ -1046,6 +1053,8 @@ export class GameEngine {
     }
     this.playerLane = lane;
     this.chordPoseTimer = 0;
+    this.chordSafeTimer = 0;
+    this.airChordExposeTimer = 0;
     this.playerY = nextY;
     this.playerRotation = lane === 'high' ? -0.16 : 0.12;
     this.slashRecoilX = 24;
@@ -1178,29 +1187,28 @@ export class GameEngine {
     // 1. Check active Beat Rush boss core first
     const rushTarget = this.findActiveRushTarget(hitAudioSec, goodSec);
     if (rushTarget) {
+      this.chordSafeTimer = 0.14;
+      this.airChordExposeTimer = 0;
       this.applyRushMashHit(rushTarget);
       return;
     }
 
     const all = this.terrain.getAllTargets();
     let bestChord: BeatTarget | null = null;
-    let bestFallback: BeatTarget | null = null;
 
     for (let i = this.firstUnresolvedIdx; i < all.length; i++) {
       const t = all[i]!;
       if (t.resolved) continue;
-      if (t.timeSec - hitAudioSec > goodSec) break;
-      if (Math.abs(hitAudioSec - t.timeSec) > goodSec) continue;
+      if (t.timeSec - hitAudioSec > goodSec + CHORD_SYNC_WINDOW_SEC) break;
 
-      if (t.kind === 'chord') {
+      if (
+        t.kind === 'chord' &&
+        (Math.abs(hitAudioSec - t.timeSec) <= goodSec ||
+          (t.chordPartialSec !== undefined &&
+            Math.abs(hitAudioSec - t.chordPartialSec) <= CHORD_SYNC_WINDOW_SEC))
+      ) {
         bestChord = t;
         break;
-      }
-      if (
-        !bestFallback &&
-        (t.kind === 'high' || t.kind === 'low' || (t.kind === 'hold' && !t.holdActive))
-      ) {
-        bestFallback = t;
       }
     }
 
@@ -1209,17 +1217,10 @@ export class GameEngine {
       return;
     }
 
-    if (bestFallback) {
-      this.snapPlayerToLane(bestFallback.lane);
-      if (bestFallback.kind === 'hold') {
-        this.activateHoldHead(bestFallback, hitAudioSec);
-      } else {
-        this.resolveSingleTargetHit(bestFallback, bestFallback.lane, hitAudioSec);
-      }
-      return;
-    }
-
-    // Air X-cross swing
+    // Air X-cross swing (never hits single-lane targets; exposes wide midY posture to both 1F/2F hazards)
+    this.chordPoseTimer = 0.22;
+    this.chordSafeTimer = 0;
+    this.airChordExposeTimer = 0.22;
     this.shiftActiveForm('treble', 0.28);
     const rx = this.getReticleScreenX();
     const midY = (this.terrain.getLaneHighScreenY() + this.terrain.getLaneLowScreenY()) * 0.5;
@@ -1241,14 +1242,15 @@ export class GameEngine {
     }
 
     const all = this.terrain.getAllTargets();
-    let matchedTarget: BeatTarget | null = null;
+    let bestLane: BeatTarget | null = null;
+    let bestChord: BeatTarget | null = null;
 
     for (let i = this.firstUnresolvedIdx; i < all.length; i++) {
       const t = all[i]!;
       if (t.resolved) continue;
-      if (t.timeSec - hitAudioSec > goodSec) break;
+      if (t.timeSec - hitAudioSec > goodSec + CHORD_SYNC_WINDOW_SEC) break;
 
-      // [Fix 4] Check half-struck CHORD awaiting opposite-hand completion within 50ms
+      // Priority 1: Complete half-struck CHORD awaiting opposite-hand input within 50ms
       if (
         t.kind === 'chord' &&
         t.chordPartialLane !== undefined &&
@@ -1262,19 +1264,22 @@ export class GameEngine {
 
       if (Math.abs(hitAudioSec - t.timeSec) > goodSec) continue;
 
-      if (t.kind === lane) {
-        matchedTarget = t;
-        break;
-      }
-      if (t.kind === 'hold' && t.lane === lane && !t.holdActive) {
-        matchedTarget = t;
-        break;
-      }
-      if (t.kind === 'chord' && t.chordPartialLane === undefined) {
-        matchedTarget = t;
-        break;
+      if (
+        !bestLane &&
+        (t.kind === lane || (t.kind === 'hold' && t.lane === lane && !t.holdActive))
+      ) {
+        bestLane = t;
+      } else if (!bestChord && t.kind === 'chord' && t.chordPartialLane === undefined) {
+        bestChord = t;
       }
     }
+
+    const matchedTarget =
+      bestLane && bestChord
+        ? Math.abs(hitAudioSec - bestLane.timeSec) <= Math.abs(hitAudioSec - bestChord.timeSec)
+          ? bestLane
+          : bestChord
+        : (bestLane ?? bestChord);
 
     if (matchedTarget) {
       if (matchedTarget.kind === 'chord') {
@@ -1495,6 +1500,8 @@ export class GameEngine {
     this.reticlePulseHigh = 1.0;
     this.reticlePulseLow = 1.0;
     this.chordPoseTimer = 0.18;
+    this.chordSafeTimer = 0.18;
+    this.airChordExposeTimer = 0;
     const rx = this.getReticleScreenX();
     const highY = this.terrain.getLaneHighScreenY();
     const lowY = this.terrain.getLaneLowScreenY();
@@ -1651,6 +1658,9 @@ export class GameEngine {
     this.laneHighHeld = false;
     this.laneLowHeld = false;
     this.laneChordHeld = false;
+    this.chordPoseTimer = 0;
+    this.chordSafeTimer = 0;
+    this.airChordExposeTimer = 0;
     this.hitstopTimer = 0;
     this.audio.stop();
     this.audio.sfx.playStageFail();
@@ -1963,38 +1973,13 @@ export class GameEngine {
 
       if (target.kind === 'chord') {
         if (target.chordPartialLane !== undefined && target.chordPartialSec !== undefined) {
-          if (
-            effectiveAudioSec - target.chordPartialSec > CHORD_SYNC_WINDOW_SEC ||
-            effectiveAudioSec > target.timeSec + goodSec
-          ) {
-            // [Fix 4] Single-hand CHORD partial expires -> settle as 50% GOOD hit (zero stuck targets)
-            target.resolved = true;
-            target.hitGrade = 'GOOD';
-            this.scoreJudge.recordOrbCollected();
-            const partialLane = target.chordPartialLane;
-            const py = partialLane === 'high' ? highY : lowY;
-            this.collectPrismStarIfPresent(target, reticleScreenX, py);
-            this.audio.sfx.playSlashHit(partialLane, 'GOOD', false);
-            this.emitSlashJudgment(
-              'GOOD',
-              reticleScreenX,
-              py,
-              Math.abs(target.chordPartialSignedMs ?? 0),
-              260,
-              target.chordPartialSignedMs,
-              false,
-              partialLane
-            );
-            this.vfx.spawnSlicedEnemy(
-              reticleScreenX,
-              py,
-              target.radius * 0.85,
-              partialLane === 'high' ? -0.4 : 0.4,
-              GOLD_RGB,
-              Boolean(target.isPrismStar)
-            );
+          if (effectiveAudioSec - target.chordPartialSec > CHORD_SYNC_WINDOW_SEC) {
+            target.chordPartialLane = undefined;
+            target.chordPartialSec = undefined;
+            target.chordPartialSignedMs = undefined;
           }
-        } else if (effectiveAudioSec > target.timeSec + goodSec) {
+        }
+        if (target.chordPartialLane === undefined && effectiveAudioSec > target.timeSec + goodSec) {
           target.resolved = true;
           target.hitGrade = 'MISS';
           this.handleMissedTarget(target, true);
@@ -2006,9 +1991,7 @@ export class GameEngine {
         const endSec = target.endTimeSec ?? target.timeSec + 0.5;
         if (target.holdActive) {
           const laneY = target.lane === 'high' ? highY : lowY;
-          const isHeld =
-            this.laneChordHeld ||
-            (target.lane === 'high' ? this.laneHighHeld : this.laneLowHeld);
+          const isHeld = target.lane === 'high' ? this.laneHighHeld : this.laneLowHeld;
 
           if (effectiveAudioSec >= endSec - 0.05) {
             // [Fix 4] HOLD ribbon tail completion
@@ -2135,9 +2118,13 @@ export class GameEngine {
             this.audio.sfx.playHazardShatter();
             this.vfx.spawnSlicedEnemy(reticleScreenX, hazY, target.radius, -0.42, GOLD_RGB);
             this.vfx.spawnBurst(reticleScreenX, hazY, GOLD_RGB, 14);
-          } else if (this.playerLane === target.lane && this.chordPoseTimer <= 0) {
+          } else if (
+            this.chordSafeTimer <= 0 &&
+            (this.airChordExposeTimer > 0 || this.playerLane === target.lane)
+          ) {
             target.resolved = true;
             target.hitGrade = 'MISS';
+            this.airChordExposeTimer = 0;
             this.applyHazardDamage();
             this.scoreJudge.recordJudgment('MISS', undefined, 0, 1, undefined, {
               lane: target.lane,
@@ -2197,6 +2184,12 @@ export class GameEngine {
       this.shiftActiveForm(bandForm, 0.18);
     }
 
+    if (this.chordSafeTimer > 0) {
+      this.chordSafeTimer = Math.max(0, this.chordSafeTimer - dt);
+    }
+    if (this.airChordExposeTimer > 0) {
+      this.airChordExposeTimer = Math.max(0, this.airChordExposeTimer - dt);
+    }
     if (this.chordPoseTimer > 0) {
       this.chordPoseTimer = Math.max(0, this.chordPoseTimer - dt);
     } else if (this.playerLane === 'high') {

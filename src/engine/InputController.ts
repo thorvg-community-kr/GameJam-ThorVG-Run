@@ -23,7 +23,6 @@ export interface GameInputCommands {
 
 const HIGH_KEY_CODES = new Set(['KeyF', 'KeyD', 'KeyW', 'ArrowUp']);
 const LOW_KEY_CODES = new Set(['KeyJ', 'KeyK', 'KeyS', 'ArrowDown']);
-const TOUCH_CHORD_SYNC_MS = 50;
 
 function resolveElement(target: EventTarget | null): Element | null {
   if (target instanceof Element) return target;
@@ -78,10 +77,7 @@ export class InputController {
     const lowSources = new Set<string>();
     const chordSources = new Set<string>();
     const activeMouseButtons = new Map<number, SlashLane | 'chord'>();
-    const activeTouches = new Map<
-      number,
-      { lane: SlashLane | 'chord'; startTimeMs: number }
-    >();
+    const activeTouches = new Map<number, SlashLane | 'chord'>();
     const pausedTouches = new Map<number, { x: number; y: number }>();
 
     const addHoldSource = (lane: SlashLane | 'chord', sourceId: string): void => {
@@ -382,20 +378,9 @@ export class InputController {
         return;
       }
 
-      const nowMs =
-        Number.isFinite(e.timeStamp) && e.timeStamp > 0 ? e.timeStamp : performance.now();
       const rect = containerEl.getBoundingClientRect();
       const splitRatio = this.commands.getTouchSplitYRatio?.() ?? 0.6;
       const midY = rect.top + rect.height * splitRatio;
-
-      let recentOppositeHigh = false;
-      let recentOppositeLow = false;
-      for (const prev of activeTouches.values()) {
-        if (nowMs - prev.startTimeMs <= TOUCH_CHORD_SYNC_MS) {
-          if (prev.lane === 'high') recentOppositeHigh = true;
-          else if (prev.lane === 'low') recentOppositeLow = true;
-        }
-      }
 
       let handledLive = false;
       let addedHigh = false;
@@ -417,11 +402,11 @@ export class InputController {
 
         handledLive = true;
         const sourceId = `touch:${touch.identifier}`;
-        const prevEntry = activeTouches.get(touch.identifier);
-        if (prevEntry && prevEntry.lane !== lane) {
-          removeHoldSource(prevEntry.lane, sourceId);
+        const prevLane = activeTouches.get(touch.identifier);
+        if (prevLane && prevLane !== lane) {
+          removeHoldSource(prevLane, sourceId);
         }
-        activeTouches.set(touch.identifier, { lane, startTimeMs: nowMs });
+        activeTouches.set(touch.identifier, lane);
         addHoldSource(lane, sourceId);
 
         if (lane === 'chord') addedChord = true;
@@ -432,17 +417,13 @@ export class InputController {
       if (!handledLive) return;
       e.preventDefault();
 
-      const shouldFireChord =
-        addedChord ||
-        (addedHigh && addedLow) ||
-        (addedHigh && recentOppositeLow) ||
-        (addedLow && recentOppositeHigh);
-
-      if (shouldFireChord) {
+      if (addedChord) {
         this.commands.onSlashChord(e.timeStamp);
-      } else if (addedHigh) {
+      }
+      if (addedHigh) {
         this.commands.onSlashHigh(e.timeStamp);
-      } else if (addedLow) {
+      }
+      if (addedLow) {
         this.commands.onSlashLow(e.timeStamp);
       }
     };
@@ -539,10 +520,10 @@ export class InputController {
       syncPauseState();
       for (let i = 0; i < e.changedTouches.length; i++) {
         const touch = e.changedTouches[i]!;
-        const entry = activeTouches.get(touch.identifier);
-        if (entry) {
+        const recordedLane = activeTouches.get(touch.identifier);
+        if (recordedLane) {
           activeTouches.delete(touch.identifier);
-          removeHoldSource(entry.lane, `touch:${touch.identifier}`);
+          removeHoldSource(recordedLane, `touch:${touch.identifier}`);
         }
         pausedTouches.delete(touch.identifier);
       }

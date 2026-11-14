@@ -87,7 +87,8 @@ export const en = {
       chordTag: 'DUAL',
       chordKey: 'Space',
       chordDesc: 'Cross Slash',
-      chordDetail: 'Alt keys: [F + J] · Cleaves upper & lower Gold Cross targets simultaneously.',
+      chordDetail:
+        'Alt keys: [F + J] · Exclusively cleaves Gold Cross & Rush targets (does not slash single 1F/2F notes).',
       utilTag: 'SYS',
       utilKey: 'Shift · Esc',
       utilDesc: 'Boost · Pause',
@@ -106,7 +107,8 @@ export const en = {
       chordTag: 'DUAL',
       chordKey: '2-Finger / [CROSS]',
       chordDesc: 'Cross Slash',
-      chordDetail: '2-finger tap or [CROSS] pad to cleave dual Gold Cross targets.',
+      chordDetail:
+        '2-finger tap or [CROSS] pad · Exclusively cleaves Gold Cross & Rush targets (not single 1F/2F notes).',
       utilTag: 'SYS',
       utilKey: 'Boost · Pinch',
       utilDesc: 'Boost · 20x Zoom',
@@ -365,7 +367,7 @@ export const en = {
         chipChord: 'DUAL [Space / F+J]',
         chipChordTouch: 'DUAL [2-Finger / CROSS]',
         chipHold: 'HOLD [Keep Pressed]',
-        desc: 'Cleave vertically linked Gold Twin Cores together, and keep holding until long neon ribbons end.',
+        desc: 'Cleave linked Gold Twin Cores exclusively with [Space / F+J], and hold single-lane ribbons until their tail ends.',
       },
       dodge: {
         step: 'STEP 03',
@@ -453,7 +455,8 @@ export const ko: Messages = {
       chordTag: '동시',
       chordKey: 'Space',
       chordDesc: '동시 베기',
-      chordDetail: '보조키 [F + J] · 상·하단 골드 코어를 동시에 양단해 보너스 점수를 얻습니다.',
+      chordDetail:
+        '보조키 [F + J] · 황금 동시 코어·연타 보스 전용 참격입니다 (일반 1·2층 단일 노트는 베어지지 않음).',
       utilTag: '특수',
       utilKey: 'Shift · Esc',
       utilDesc: '각성 · 일시정지',
@@ -472,7 +475,8 @@ export const ko: Messages = {
       chordTag: '동시',
       chordKey: '양손 / [CROSS]',
       chordDesc: '동시 베기',
-      chordDetail: '두 손가락 동시 탭 또는 [CROSS] 패드로 상·하단 골드 코어를 동시 발도합니다.',
+      chordDetail:
+        '두 손가락 탭 또는 [CROSS] 패드 · 황금 동시 코어·연타 보스 전용 참격입니다 (일반 단일 노트 불가).',
       utilTag: '특수',
       utilKey: '각성 · 핀치줌',
       utilDesc: '각성 · 20x 줌',
@@ -731,7 +735,7 @@ export const ko: Messages = {
         chipChord: '동시 [Space / F+J]',
         chipChordTouch: '동시 [양손 탭 / CROSS]',
         chipHold: '롱노트 [끝까지 유지]',
-        desc: '위·아래가 연결된 황금 타겟은 동시에 양단하고, 긴 리본 노트는 끝이 지날 때까지 유지하세요.',
+        desc: '황금 동시 타겟 전용([Space / F+J]만 판정, 일반 노트 불가)이며, 긴 리본 노트는 해당 레인 키를 끝까지 유지하세요.',
       },
       dodge: {
         step: 'STEP 03',
