@@ -18,12 +18,14 @@ import {
   loadSelectedSkin,
   loadSelectedTrackId,
   loadSfxVolume,
+  loadVideoBgEnabled,
   saveAudioOffsetMs,
   saveBgmVolume,
   saveReducedMotion,
   saveSelectedSkin,
   saveSelectedTrackId,
   saveSfxVolume,
+  saveVideoBgEnabled,
 } from './engine/recordsStore';
 import { useCoarsePointer } from './hooks/useCoarsePointer';
 import { trackTitle } from './i18n/display';
@@ -52,6 +54,37 @@ function loadInitialCinematic(): boolean {
     // Ignore storage access errors (e.g. private browsing / restricted context).
   }
   return true;
+}
+
+function syncBgVideoTime(
+  video: HTMLVideoElement,
+  rawTargetSec: number,
+  fallbackDurationSec: number,
+  minDeltaSec: number = 0.002
+): void {
+  if (video.readyState < 1 || video.seeking || !Number.isFinite(rawTargetSec)) return;
+  const hasFiniteVideoDur = Number.isFinite(video.duration) && video.duration > 0;
+  const safeDur = hasFiniteVideoDur
+    ? video.duration
+    : Number.isFinite(fallbackDurationSec) && fallbackDurationSec > 0
+      ? fallbackDurationSec
+      : 0;
+  if (
+    hasFiniteVideoDur &&
+    rawTargetSec >= video.duration - 0.02 &&
+    (video.ended || video.currentTime >= video.duration - 0.08)
+  ) {
+    return;
+  }
+  const maxSeek = safeDur > 0 ? Math.max(0, safeDur - 0.01) : Math.max(0, rawTargetSec);
+  const targetSec = Math.max(0, Math.min(maxSeek, rawTargetSec));
+  if (!Number.isFinite(targetSec)) return;
+  if (Math.abs(video.currentTime - targetSec) <= minDeltaSec) return;
+  try {
+    video.currentTime = targetSec;
+  } catch {
+    // Ignore transient browser media seek exceptions
+  }
 }
 
 const INITIAL_HUD: HUDTelemetry = {
@@ -108,12 +141,6 @@ export const App: React.FC = () => {
     const savedId = loadSelectedTrackId();
     return BUILT_IN_TRACKS.find((track) => track.id === savedId) ?? BUILT_IN_TRACKS[0]!;
   });
-  const handleSelectTrack = useCallback((track: TrackMetadata) => {
-    setSelectedTrack(track);
-    if (!track.isCustom) {
-      saveSelectedTrackId(track.id);
-    }
-  }, []);
   const handleOpenGuide = useCallback(() => setIsGuideOpen(true), []);
   const handleCloseGuide = useCallback(() => setIsGuideOpen(false), []);
   const [customTracks, setCustomTracks] = useState<TrackMetadata[]>([]);
@@ -126,6 +153,8 @@ export const App: React.FC = () => {
   const [bgmVolume, setBgmVolume] = useState<number>(() => loadBgmVolume());
   const [sfxVolume, setSfxVolume] = useState<number>(() => loadSfxVolume());
   const [reducedMotion, setReducedMotion] = useState<boolean>(() => loadReducedMotion());
+  const [videoBgEnabled, setVideoBgEnabled] = useState<boolean>(() => loadVideoBgEnabled());
+  const [videoPlaybackBlocked, setVideoPlaybackBlocked] = useState<boolean>(false);
   const [engineReady, setEngineReady] = useState<boolean>(false);
   /** Increments each time a renderer finishes init, so loops can restart on the new instance. */
   const [rendererEpoch, setRendererEpoch] = useState<number>(0);
@@ -143,6 +172,7 @@ export const App: React.FC = () => {
   });
 
   const shellRef = useRef<HTMLDivElement | null>(null);
+  const bgVideoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rendererRef = useRef<ThorVGRenderer | null>(null);
   const audioRef = useRef<AudioEngine | null>(null);
@@ -159,7 +189,15 @@ export const App: React.FC = () => {
     };
   }, []);
 
+  const isPaused = Boolean(hud.isPaused);
+  const hasSelectedVideo = Boolean(selectedTrack.hasVideo && selectedTrack.videoUrl);
+  const activeVideoUrl = hasSelectedVideo ? selectedTrack.videoUrl : undefined;
+  const effectiveVideoBgActive =
+    inGame && hasSelectedVideo && videoBgEnabled && !videoPlaybackBlocked;
+
   // Refs read by RAF preview and InputController without re-subscribing listeners.
+  const selectedTrackRef = useRef<TrackMetadata>(selectedTrack);
+  selectedTrackRef.current = selectedTrack;
   const cinematicCameraRef = useRef<boolean>(cinematicCamera);
   cinematicCameraRef.current = cinematicCamera;
   const difficultyRef = useRef<DifficultyMode>(difficulty);
@@ -174,11 +212,43 @@ export const App: React.FC = () => {
   sfxVolumeRef.current = sfxVolume;
   const reducedMotionRef = useRef<boolean>(reducedMotion);
   reducedMotionRef.current = reducedMotion;
+  const videoBgEnabledRef = useRef<boolean>(videoBgEnabled);
+  videoBgEnabledRef.current = videoBgEnabled;
+  const videoPlaybackBlockedRef = useRef<boolean>(videoPlaybackBlocked);
+  videoPlaybackBlockedRef.current = videoPlaybackBlocked;
+  const effectiveVideoBgActiveRef = useRef<boolean>(effectiveVideoBgActive);
+  effectiveVideoBgActiveRef.current = effectiveVideoBgActive;
   const finishedAtRef = useRef<number>(0);
   const inGameRef = useRef<boolean>(inGame);
   inGameRef.current = inGame;
+  const isPausedRef = useRef<boolean>(isPaused);
+  isPausedRef.current = isPaused;
   const isFinishedRef = useRef<boolean>(hud.isFinished);
   isFinishedRef.current = hud.isFinished;
+
+  const handleSelectTrack = useCallback((track: TrackMetadata) => {
+    selectedTrackRef.current = track;
+    videoPlaybackBlockedRef.current = false;
+    setVideoPlaybackBlocked(false);
+    setSelectedTrack(track);
+    if (track.isCustom) {
+      audioRef.current?.touchCustomTrack(track.id);
+    } else {
+      saveSelectedTrackId(track.id);
+    }
+    if (!(track.hasVideo && track.videoUrl)) {
+      const video = bgVideoRef.current;
+      if (video) {
+        try {
+          video.pause();
+          video.removeAttribute('src');
+          video.load();
+        } catch {
+          // Ignore media reset errors
+        }
+      }
+    }
+  }, []);
 
   // The splash plays once per page load, even if the renderer is re-created later.
   const splashStartedRef = useRef<boolean>(false);
@@ -199,6 +269,11 @@ export const App: React.FC = () => {
   }
   if (!gameEngineRef.current) {
     const engine = new GameEngine(audioRef.current, (nextHud) => {
+      isPausedRef.current = Boolean(nextHud.isPaused);
+      isFinishedRef.current = nextHud.isFinished;
+      if (nextHud.isFinished || nextHud.isPaused) {
+        bgVideoRef.current?.pause();
+      }
       if (nextHud.isFinished) {
         if (finishedAtRef.current === 0) {
           finishedAtRef.current = performance.now();
@@ -215,6 +290,136 @@ export const App: React.FC = () => {
     engine.setReducedMotion(reducedMotionRef.current);
     gameEngineRef.current = engine;
   }
+
+  const safePlayBgVideo = useCallback((video: HTMLVideoElement) => {
+    video.muted = true;
+    const playPromise = video.play();
+    if (playPromise && typeof playPromise.catch === 'function') {
+      playPromise.catch((err: unknown) => {
+        const errName =
+          err instanceof DOMException ? err.name : (err as { name?: string })?.name;
+        if (errName === 'AbortError') return;
+        if (
+          inGameRef.current &&
+          !isPausedRef.current &&
+          !isFinishedRef.current &&
+          videoBgEnabledRef.current
+        ) {
+          videoPlaybackBlockedRef.current = true;
+          setVideoPlaybackBlocked(true);
+        }
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    const video = bgVideoRef.current;
+    if (video) {
+      video.defaultMuted = true;
+      video.muted = true;
+    }
+    return () => {
+      if (bgVideoRef.current) {
+        try {
+          bgVideoRef.current.pause();
+          bgVideoRef.current.removeAttribute('src');
+          bgVideoRef.current.load();
+        } catch {
+          // Ignore media cleanup errors on unmount
+        }
+      }
+      audioRef.current?.disposeAllCustomMedia();
+    };
+  }, []);
+
+  useEffect(() => {
+    videoPlaybackBlockedRef.current = false;
+    setVideoPlaybackBlocked(false);
+    const video = bgVideoRef.current;
+    if (!video || activeVideoUrl) return;
+    if (video.hasAttribute('src') || video.readyState > 0) {
+      try {
+        video.pause();
+        video.removeAttribute('src');
+        video.load();
+      } catch {
+        // Ignore media reset errors
+      }
+    }
+  }, [activeVideoUrl]);
+
+  useEffect(() => {
+    effectiveVideoBgActiveRef.current = effectiveVideoBgActive;
+    gameEngineRef.current?.setVideoBackgroundActive(effectiveVideoBgActive);
+  }, [effectiveVideoBgActive]);
+
+  useEffect(() => {
+    const video = bgVideoRef.current;
+    const engine = gameEngineRef.current;
+    if (!video) return;
+
+    if (!inGame || !effectiveVideoBgActive || hud.isFinished) {
+      video.pause();
+      return;
+    }
+
+    if (isPaused) {
+      video.pause();
+      if (engine) {
+        syncBgVideoTime(
+          video,
+          engine.getCurrentVideoSyncSec(),
+          selectedTrack.durationSec,
+          0.002
+        );
+      }
+      return;
+    }
+
+    if (engine) {
+      syncBgVideoTime(
+        video,
+        engine.getCurrentVideoSyncSec(),
+        selectedTrack.durationSec,
+        0.05
+      );
+    }
+    safePlayBgVideo(video);
+
+    let rafId = 0;
+    const syncTick = () => {
+      const liveEngine = gameEngineRef.current;
+      if (
+        liveEngine &&
+        inGameRef.current &&
+        !isPausedRef.current &&
+        !isFinishedRef.current &&
+        effectiveVideoBgActiveRef.current
+      ) {
+        syncBgVideoTime(
+          video,
+          liveEngine.getCurrentVideoSyncSec(),
+          selectedTrackRef.current.durationSec,
+          0.12
+        );
+      }
+      rafId = requestAnimationFrame(syncTick);
+    };
+    rafId = requestAnimationFrame(syncTick);
+
+    return () => {
+      cancelAnimationFrame(rafId);
+    };
+  }, [
+    activeVideoUrl,
+    effectiveVideoBgActive,
+    hud.isFinished,
+    inGame,
+    isPaused,
+    launchKey,
+    safePlayBgVideo,
+    selectedTrack.durationSec,
+  ]);
 
   useEffect(() => {
     cinematicCameraRef.current = cinematicCamera;
@@ -292,6 +497,7 @@ export const App: React.FC = () => {
     const autoPauseIfActive = () => {
       if (inGameRef.current && !isFinishedRef.current) {
         gameEngineRef.current?.pauseRun();
+        bgVideoRef.current?.pause();
       }
     };
     const onVisibilityChange = () => {
@@ -344,6 +550,7 @@ export const App: React.FC = () => {
         gameEngineRef.current?.setSelectedSkin(selectedSkinRef.current);
         gameEngineRef.current?.setAudioOffsetMs(audioOffsetMsRef.current);
         gameEngineRef.current?.setReducedMotion(reducedMotionRef.current);
+        gameEngineRef.current?.setVideoBackgroundActive(effectiveVideoBgActiveRef.current);
         gameEngineRef.current?.attachRenderer(renderer, rendererMode, w, h);
         setEngineReady(true);
         setRendererEpoch((n) => n + 1);
@@ -428,6 +635,12 @@ export const App: React.FC = () => {
   const handleReturnToMenu = useCallback(() => {
     launchSeqRef.current++;
     finishedAtRef.current = 0;
+    inGameRef.current = false;
+    effectiveVideoBgActiveRef.current = false;
+    if (bgVideoRef.current) {
+      bgVideoRef.current.pause();
+      syncBgVideoTime(bgVideoRef.current, 0, selectedTrackRef.current.durationSec, 0);
+    }
     gameEngineRef.current?.stopRun();
     rendererRef.current?.clearForTransition();
     setHud((prev) => ({
@@ -444,10 +657,32 @@ export const App: React.FC = () => {
   const handleTogglePause = useCallback(() => {
     audioRef.current?.unlockFromGesture();
     gameEngineRef.current?.togglePause();
+    if (gameEngineRef.current?.isPaused && bgVideoRef.current) {
+      bgVideoRef.current.pause();
+      if (effectiveVideoBgActiveRef.current) {
+        syncBgVideoTime(
+          bgVideoRef.current,
+          gameEngineRef.current.getCurrentVideoSyncSec(),
+          selectedTrackRef.current.durationSec,
+          0.002
+        );
+      }
+    }
   }, []);
 
   const handlePauseRun = useCallback(() => {
     gameEngineRef.current?.pauseRun();
+    if (bgVideoRef.current) {
+      bgVideoRef.current.pause();
+      if (gameEngineRef.current && effectiveVideoBgActiveRef.current) {
+        syncBgVideoTime(
+          bgVideoRef.current,
+          gameEngineRef.current.getCurrentVideoSyncSec(),
+          selectedTrackRef.current.durationSec,
+          0.002
+        );
+      }
+    }
   }, []);
 
   const handleResumeRun = useCallback(() => {
@@ -471,8 +706,56 @@ export const App: React.FC = () => {
     const clamped = saveAudioOffsetMs(next);
     audioOffsetMsRef.current = clamped;
     setAudioOffsetMs(clamped);
-    gameEngineRef.current?.setAudioOffsetMs(clamped);
+    const engine = gameEngineRef.current;
+    engine?.setAudioOffsetMs(clamped);
+    if (
+      engine &&
+      bgVideoRef.current &&
+      inGameRef.current &&
+      selectedTrackRef.current.hasVideo &&
+      selectedTrackRef.current.videoUrl
+    ) {
+      syncBgVideoTime(
+        bgVideoRef.current,
+        engine.getCurrentVideoSyncSec(),
+        selectedTrackRef.current.durationSec,
+        0.002
+      );
+    }
   }, []);
+
+  const handleToggleVideoBg = useCallback(() => {
+    const track = selectedTrackRef.current;
+    if (!track.hasVideo) return;
+    const next = saveVideoBgEnabled(!videoBgEnabledRef.current);
+    videoBgEnabledRef.current = next;
+    videoPlaybackBlockedRef.current = false;
+    setVideoPlaybackBlocked(false);
+    setVideoBgEnabled(next);
+
+    const nextEffective = inGameRef.current && Boolean(track.hasVideo && track.videoUrl) && next;
+    effectiveVideoBgActiveRef.current = nextEffective;
+    const engine = gameEngineRef.current;
+    engine?.setVideoBackgroundActive(nextEffective);
+
+    const video = bgVideoRef.current;
+    if (!video || !inGameRef.current) return;
+    if (!nextEffective || isFinishedRef.current) {
+      video.pause();
+      return;
+    }
+    if (isPausedRef.current) {
+      video.pause();
+      if (engine) {
+        syncBgVideoTime(video, engine.getCurrentVideoSyncSec(), track.durationSec, 0.002);
+      }
+      return;
+    }
+    if (engine) {
+      syncBgVideoTime(video, engine.getCurrentVideoSyncSec(), track.durationSec, 0.05);
+    }
+    safePlayBgVideo(video);
+  }, [safePlayBgVideo]);
 
   const handleChangeBgmVolume = useCallback((next: number) => {
     const applied = audioRef.current
@@ -516,11 +799,24 @@ export const App: React.FC = () => {
   }, []);
 
   const handleUploadFile = useCallback(
-    async (file: File, supportedFormats: readonly AudioFormat[]) => {
-      if (!audioRef.current) return;
+    async (
+      file: File,
+      supportedFormats: readonly AudioFormat[]
+    ): Promise<TrackMetadata | undefined> => {
+      if (!audioRef.current) return undefined;
       const decodedTrack = await audioRef.current.decodeLocalFile(file, supportedFormats);
-      setCustomTracks((prev) => [decodedTrack, ...prev]);
+      const keepIds = [decodedTrack.id, selectedTrackRef.current.id];
+      const evictedIds = audioRef.current.evictOldCustomTracks(keepIds);
+      const evictedSet = new Set(evictedIds);
+      setCustomTracks((prev) => [
+        decodedTrack,
+        ...prev.filter((item) => !evictedSet.has(item.id)),
+      ]);
+      videoPlaybackBlockedRef.current = false;
+      setVideoPlaybackBlocked(false);
+      selectedTrackRef.current = decodedTrack;
       setSelectedTrack(decodedTrack);
+      return decodedTrack;
     },
     []
   );
@@ -545,6 +841,37 @@ export const App: React.FC = () => {
     audioRef.current?.unlockFromGesture();
     const seq = ++launchSeqRef.current;
     finishedAtRef.current = 0;
+    inGameRef.current = false;
+    effectiveVideoBgActiveRef.current = false;
+    videoPlaybackBlockedRef.current = false;
+    setVideoPlaybackBlocked(false);
+
+    const video = bgVideoRef.current;
+    if (video && selectedTrack.hasVideo && selectedTrack.videoUrl) {
+      video.muted = true;
+      if (video.getAttribute('src') !== selectedTrack.videoUrl) {
+        video.src = selectedTrack.videoUrl;
+      }
+      const primePromise = video.play();
+      if (primePromise && typeof primePromise.then === 'function') {
+        primePromise
+          .then(() => {
+            if (launchSeqRef.current === seq && !inGameRef.current) {
+              video.pause();
+              syncBgVideoTime(video, 0, selectedTrack.durationSec, 0);
+            }
+          })
+          .catch((err: unknown) => {
+            const errName =
+              err instanceof DOMException ? err.name : (err as { name?: string })?.name;
+            if (errName === 'AbortError') return;
+            // Live phase will retry or fallback cleanly without interrupting preparation
+          });
+      }
+    } else if (video) {
+      video.pause();
+    }
+
     rendererRef.current?.clearForTransition();
     engine.setCinematicCamera(cinematicCamera);
     engine.setSelectedSkin(selectedSkinRef.current);
@@ -582,6 +909,7 @@ export const App: React.FC = () => {
           const detectedBpm = Math.round(blueprint.bpm);
           if (detectedBpm !== selectedTrack.bpm) {
             resolvedTrack = { ...selectedTrack, bpm: detectedBpm };
+            selectedTrackRef.current = resolvedTrack;
             setCustomTracks((prev) =>
               prev.map((item) =>
                 item.id === selectedTrack.id ? { ...item, bpm: detectedBpm } : item
@@ -598,6 +926,20 @@ export const App: React.FC = () => {
         await new Promise((r) => setTimeout(r, 480));
         if (launchSeqRef.current !== seq) return;
 
+        const shouldActivateVideoBg =
+          Boolean(resolvedTrack.hasVideo && resolvedTrack.videoUrl) &&
+          videoBgEnabledRef.current &&
+          !videoPlaybackBlockedRef.current;
+        inGameRef.current = true;
+        isPausedRef.current = false;
+        isFinishedRef.current = false;
+        effectiveVideoBgActiveRef.current = shouldActivateVideoBg;
+        engine.setVideoBackgroundActive(shouldActivateVideoBg);
+        if (bgVideoRef.current && shouldActivateVideoBg) {
+          syncBgVideoTime(bgVideoRef.current, 0, resolvedTrack.durationSec, 0);
+          safePlayBgVideo(bgVideoRef.current);
+        }
+
         const runPromise = engine.startRun(resolvedTrack, undefined, difficulty);
         setLaunchKey((k) => k + 1);
         setScreen('game');
@@ -605,11 +947,14 @@ export const App: React.FC = () => {
       } catch (err) {
         console.error('Track blueprint preparation failed:', err);
         if (launchSeqRef.current === seq) {
+          inGameRef.current = false;
+          effectiveVideoBgActiveRef.current = false;
+          bgVideoRef.current?.pause();
           setScreen('menu');
         }
       }
     })();
-  }, [cinematicCamera, difficulty, rendererMode, selectedTrack]);
+  }, [cinematicCamera, difficulty, rendererMode, safePlayBgVideo, selectedTrack]);
 
   const handleStartRunRef = useRef(handleStartRun);
   handleStartRunRef.current = handleStartRun;
@@ -620,18 +965,36 @@ export const App: React.FC = () => {
     audioRef.current?.unlockFromGesture();
     launchSeqRef.current++;
     finishedAtRef.current = 0;
+    videoPlaybackBlockedRef.current = false;
+    setVideoPlaybackBlocked(false);
     if (engine.hasPreparedBlueprint(selectedTrack, difficulty)) {
       engine.setCinematicCamera(cinematicCameraRef.current);
       engine.setSelectedSkin(selectedSkinRef.current);
       engine.setAudioOffsetMs(audioOffsetMsRef.current);
       engine.setReducedMotion(reducedMotionRef.current);
+      const shouldActivateVideoBg =
+        Boolean(selectedTrack.hasVideo && selectedTrack.videoUrl) && videoBgEnabledRef.current;
+      inGameRef.current = true;
+      isPausedRef.current = false;
+      isFinishedRef.current = false;
+      effectiveVideoBgActiveRef.current = shouldActivateVideoBg;
+      engine.setVideoBackgroundActive(shouldActivateVideoBg);
+      const video = bgVideoRef.current;
+      if (video) {
+        syncBgVideoTime(video, 0, selectedTrack.durationSec, 0);
+        if (shouldActivateVideoBg) {
+          safePlayBgVideo(video);
+        } else {
+          video.pause();
+        }
+      }
       setLaunchKey((k) => k + 1);
       setScreen('game');
       void engine.restartCurrentRun();
     } else {
       handleStartRun();
     }
-  }, [difficulty, handleStartRun, selectedTrack]);
+  }, [difficulty, handleStartRun, safePlayBgVideo, selectedTrack]);
 
   const handleQuickRetryRef = useRef(handleQuickRetry);
   handleQuickRetryRef.current = handleQuickRetry;
@@ -664,6 +1027,7 @@ export const App: React.FC = () => {
         }
       },
       onToggleCinematicCamera: handleToggleCinematicCamera,
+      onToggleVideoBackground: handleToggleVideoBg,
       onTogglePause: handleTogglePause,
       onExitToMenu: handleReturnToMenu,
       onReplayRun: () => {
@@ -690,7 +1054,7 @@ export const App: React.FC = () => {
       getTouchSplitYRatio: () => gameEngineRef.current?.getTouchSplitYRatio() ?? 0.6,
     });
     return controller.attach(shellRef.current);
-  }, [handleReturnToMenu, handleToggleCinematicCamera, handleTogglePause]);
+  }, [handleReturnToMenu, handleToggleCinematicCamera, handleTogglePause, handleToggleVideoBg]);
 
   const handleSwitchRendererAndReplay = useCallback(
     (nextMode: RendererMode) => {
@@ -715,6 +1079,57 @@ export const App: React.FC = () => {
         }
       }}
     >
+      <video
+        ref={bgVideoRef}
+        src={activeVideoUrl}
+        className={`bg-video-layer${effectiveVideoBgActive ? ' is-active' : ''}`}
+        data-testid="bg-video-layer"
+        muted
+        playsInline
+        disablePictureInPicture
+        preload="auto"
+        aria-hidden="true"
+        onLoadedMetadata={(e) => {
+          const video = e.currentTarget;
+          const engine = gameEngineRef.current;
+          if (inGameRef.current && engine && effectiveVideoBgActiveRef.current) {
+            syncBgVideoTime(
+              video,
+              engine.getCurrentVideoSyncSec(),
+              selectedTrackRef.current.durationSec,
+              0
+            );
+            if (!isPausedRef.current && !isFinishedRef.current) {
+              safePlayBgVideo(video);
+            }
+          }
+        }}
+        onSeeked={(e) => {
+          const video = e.currentTarget;
+          const engine = gameEngineRef.current;
+          if (
+            inGameRef.current &&
+            isPausedRef.current &&
+            !isFinishedRef.current &&
+            engine &&
+            effectiveVideoBgActiveRef.current
+          ) {
+            syncBgVideoTime(
+              video,
+              engine.getCurrentVideoSyncSec(),
+              selectedTrackRef.current.durationSec,
+              0.005
+            );
+          }
+        }}
+        onError={() => {
+          if (selectedTrackRef.current.hasVideo && selectedTrackRef.current.videoUrl) {
+            videoPlaybackBlockedRef.current = true;
+            setVideoPlaybackBlocked(true);
+          }
+        }}
+      />
+
       {/* Keyed by rendererMode so React cleanly replaces DOM <canvas> on CPU <-> GPU switch */}
       <canvas
         key={rendererMode}
@@ -733,6 +1148,7 @@ export const App: React.FC = () => {
           bgmVolume={bgmVolume}
           sfxVolume={sfxVolume}
           reducedMotion={reducedMotion}
+          videoBgEnabled={videoBgEnabled}
           engineReady={engineReady}
           step={menuStep}
           isGuideOpen={isGuideOpen}
@@ -747,6 +1163,7 @@ export const App: React.FC = () => {
           onChangeBgmVolume={handleChangeBgmVolume}
           onChangeSfxVolume={handleChangeSfxVolume}
           onToggleReducedMotion={handleToggleReducedMotion}
+          onToggleVideoBg={handleToggleVideoBg}
           onStartRun={handleStartRun}
         />
       )}
@@ -762,11 +1179,14 @@ export const App: React.FC = () => {
         <InGameHUD
           hud={hud}
           trackTitle={trackTitle(t, selectedTrack)}
+          hasVideo={Boolean(selectedTrack.hasVideo)}
+          videoBgEnabled={videoBgEnabled}
           onReturnToMenu={handleReturnToMenu}
           onPause={handlePauseRun}
           onStepZoom={handleStepZoom}
           onResetZoom={handleResetView}
           onToggleCinematicCamera={handleToggleCinematicCamera}
+          onToggleVideoBg={handleToggleVideoBg}
           onToggleRendererInGame={(nextMode) => setRendererMode(nextMode)}
           onCycleSfxMode={() => {
             const next = gameEngineRef.current?.cycleSfxMode();
@@ -788,10 +1208,13 @@ export const App: React.FC = () => {
           bgmVolume={bgmVolume}
           sfxVolume={sfxVolume}
           reducedMotion={reducedMotion}
+          hasVideo={Boolean(selectedTrack.hasVideo)}
+          videoBgEnabled={videoBgEnabled}
           onChangeAudioOffset={handleChangeAudioOffset}
           onChangeBgmVolume={handleChangeBgmVolume}
           onChangeSfxVolume={handleChangeSfxVolume}
           onToggleReducedMotion={handleToggleReducedMotion}
+          onToggleVideoBg={handleToggleVideoBg}
           onResume={handleResumeRun}
           onQuickRetry={handleQuickRetry}
           onReturnToMenu={handleReturnToMenu}

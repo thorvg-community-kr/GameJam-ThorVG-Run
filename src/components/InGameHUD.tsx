@@ -11,11 +11,14 @@ import {
 interface InGameHUDProps {
   hud: HUDTelemetry;
   trackTitle: string;
+  hasVideo: boolean;
+  videoBgEnabled: boolean;
   onReturnToMenu?: () => void;
   onPause: () => void;
   onStepZoom: (factor: number) => void;
   onResetZoom: () => void;
   onToggleCinematicCamera: () => void;
+  onToggleVideoBg: () => void;
   onToggleRendererInGame: (next: RendererMode) => void;
   onCycleSfxMode: () => void;
   onActivateOverdrive: () => void;
@@ -24,10 +27,13 @@ interface InGameHUDProps {
 export const InGameHUD: React.FC<InGameHUDProps> = ({
   hud,
   trackTitle,
+  hasVideo,
+  videoBgEnabled,
   onPause,
   onStepZoom,
   onResetZoom,
   onToggleCinematicCamera,
+  onToggleVideoBg,
   onToggleRendererInGame,
   onCycleSfxMode,
   onActivateOverdrive,
@@ -48,6 +54,13 @@ export const InGameHUD: React.FC<InGameHUDProps> = ({
   const sfxMode = hud.sfxMode ?? 'full';
   const sfxLabel =
     sfxMode === 'full' ? t.hud.sfxFull : sfxMode === 'impact' ? t.hud.sfxImpact : t.hud.sfxOff;
+  const videoBgLabel = isCoarsePointer
+    ? videoBgEnabled
+      ? t.hud.videoBgOnTouch
+      : t.hud.videoBgOffTouch
+    : videoBgEnabled
+      ? t.hud.videoBgOn
+      : t.hud.videoBgOff;
 
   const intensity = hud.sectionIntensity ?? 'groove';
   const sectionLabel =
@@ -178,6 +191,18 @@ export const InGameHUD: React.FC<InGameHUDProps> = ({
             >
               {sfxLabel}
             </button>
+            {hasVideo && (
+              <button
+                type="button"
+                data-testid="hud-video-bg-toggle-btn"
+                aria-pressed={videoBgEnabled}
+                title={t.hud.videoBgTitle}
+                className={`hud-btn video-bg-toggle-btn${videoBgEnabled ? ' active' : ''}`}
+                onClick={onToggleVideoBg}
+              >
+                {videoBgLabel}
+              </button>
+            )}
             <button
               type="button"
               className="hud-btn"

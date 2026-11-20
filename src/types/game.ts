@@ -143,6 +143,8 @@ export interface TrackMetadata {
   isCustom?: boolean;
   file?: File;
   assetUrl?: string;
+  hasVideo?: boolean;
+  videoUrl?: string;
 }
 
 export interface TrackRecord {
@@ -371,6 +373,7 @@ export interface RenderFrameState {
   afterimages: AfterimageTrail[];
   particles: VectorParticle[];
   slashes: SlashEffect[];
+  videoBackgroundActive?: boolean;
 }
 
 export interface HUDTelemetry {
@@ -418,6 +421,7 @@ export interface HUDTelemetry {
   rushCombo?: number;
   audioOffsetMs?: number;
   resumeCountdown?: 3 | 2 | 1 | null;
+  videoBackgroundActive?: boolean;
 }
 
 /**

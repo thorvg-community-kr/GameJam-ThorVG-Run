@@ -14,6 +14,7 @@ const SFX_MODE_STORAGE_KEY = 'thorvg_run:sfx_mode:v1';
 const BGM_VOLUME_STORAGE_KEY = 'thorvg_run:bgm_volume:v1';
 const SFX_VOLUME_STORAGE_KEY = 'thorvg_run:sfx_volume:v1';
 const REDUCED_MOTION_STORAGE_KEY = 'thorvg_run:reduced_motion:v1';
+const VIDEO_BG_STORAGE_KEY = 'thorvg_run:video_bg:v1';
 const SELECTED_SKIN_KEY = 'thorvg_run:selected_skin:v1';
 const AUDIO_OFFSET_MS_KEY = 'thorvg_run:audio_offset_ms:v1';
 const GUIDE_DISMISSED_KEY = 'thorvg_run:guide_dismissed:v1';
@@ -330,6 +331,27 @@ export function saveReducedMotion(enabled: boolean): boolean {
   const next = Boolean(enabled);
   try {
     window.localStorage.setItem(REDUCED_MOTION_STORAGE_KEY, next ? '1' : '0');
+  } catch {
+    // Ignore storage errors
+  }
+  return next;
+}
+
+export function loadVideoBgEnabled(): boolean {
+  try {
+    const raw = window.localStorage.getItem(VIDEO_BG_STORAGE_KEY);
+    if (raw === '0' || raw === 'false') return false;
+    if (raw === '1' || raw === 'true') return true;
+  } catch {
+    // Ignore storage errors
+  }
+  return true;
+}
+
+export function saveVideoBgEnabled(enabled: boolean): boolean {
+  const next = Boolean(enabled);
+  try {
+    window.localStorage.setItem(VIDEO_BG_STORAGE_KEY, next ? '1' : '0');
   } catch {
     // Ignore storage errors
   }

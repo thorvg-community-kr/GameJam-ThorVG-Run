@@ -24,10 +24,10 @@ export const AUDIO_FORMATS: readonly AudioFormat[] = [
   { id: 'flac', label: 'FLAC', extensions: ['.flac'], mimeTypes: ['audio/flac', 'audio/x-flac'], probe: 'audio/flac' },
   { id: 'ogg', label: 'OGG', extensions: ['.ogg', '.oga'], mimeTypes: ['audio/ogg'], probe: 'audio/ogg; codecs="vorbis"' },
   { id: 'opus', label: 'OPUS', extensions: ['.opus'], mimeTypes: ['audio/opus'], probe: 'audio/ogg; codecs="opus"' },
-  { id: 'webm', label: 'WEBM', extensions: ['.webm'], mimeTypes: ['audio/webm'], probe: 'audio/webm; codecs="opus"' },
+  { id: 'webm', label: 'WEBM', extensions: ['.webm'], mimeTypes: ['audio/webm', 'video/webm'], probe: 'audio/webm; codecs="opus"' },
 ];
 
-export const MAX_UPLOAD_MB = 50;
+export const MAX_UPLOAD_MB = 150;
 export const MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024;
 export const MIN_TRACK_SECONDS = 5;
 
@@ -77,6 +77,18 @@ export function stripAudioExtension(name: string): string {
   const ext = extensionOf(name);
   const known = AUDIO_FORMATS.some((f) => f.extensions.includes(ext));
   return known ? name.slice(0, name.length - ext.length) : name;
+}
+
+/**
+ * Returns true only for containers/MIME types that may carry a video stream (`.mp4`/`.webm`
+ * or `video/*`), avoiding unnecessary `<video>` element allocation on pure audio uploads.
+ */
+export function isVideoCandidateFile(file: File): boolean {
+  const ext = extensionOf(file.name);
+  if (ext === '.mp4' || ext === '.webm') {
+    return true;
+  }
+  return file.type.trim().toLowerCase().startsWith('video/');
 }
 
 export type AudioLoadErrorCode = 'too_large' | 'unsupported' | 'decode_failed' | 'too_short';

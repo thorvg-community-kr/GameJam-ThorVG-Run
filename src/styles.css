@@ -42,13 +42,36 @@ input[type='range'] {
   width: 100dvw;
   height: 100vh;
   height: 100dvh;
+  overflow: hidden;
   isolation: isolate;
   -webkit-tap-highlight-color: transparent;
   -webkit-touch-callout: none;
   -webkit-user-select: none;
 }
 
+video.bg-video-layer,
+.bg-video-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0;
+  background: #070914;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+}
+
+.bg-video-layer.is-active {
+  opacity: 1;
+}
+
+canvas.tvg-canvas,
 .tvg-canvas {
+  position: relative;
+  z-index: 1;
   display: block;
   width: 100%;
   height: 100%;
@@ -88,6 +111,7 @@ input[type='range'] {
 .start-screen-backdrop {
   position: absolute;
   inset: 0;
+  z-index: 2;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
@@ -1007,6 +1031,27 @@ input[type='range'] {
   background: rgba(52, 211, 153, 0.28);
 }
 
+.motion-toggle-chip.video-bg-chip.active {
+  color: #ffe600;
+  border-color: rgba(255, 230, 0, 0.62);
+  background: linear-gradient(
+    90deg,
+    rgba(5, 213, 255, 0.2) 0%,
+    rgba(255, 230, 0, 0.18) 100%
+  );
+}
+
+.motion-toggle-chip.video-bg-chip.active:hover,
+.motion-toggle-chip.video-bg-chip.active:focus-visible {
+  color: #ffffff;
+  border-color: #ffe600;
+  background: linear-gradient(
+    90deg,
+    rgba(5, 213, 255, 0.3) 0%,
+    rgba(255, 230, 0, 0.28) 100%
+  );
+}
+
 /* Step 2 Left Column: Track Bay & Sibling Audio Upload Dropzone */
 .track-section-header {
   display: flex;
@@ -1074,6 +1119,63 @@ button.menu-preview-btn,
   color: #070914;
   border-color: #ffffff;
   outline: 2px solid #070914;
+  outline-offset: -2px;
+}
+
+button.menu-video-bg-btn,
+.menu-video-bg-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  background: rgba(255, 255, 255, 0.07);
+  color: #c4d7f2;
+  font-family: var(--font-hud);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease, box-shadow 0.14s ease;
+}
+
+.menu-video-bg-btn:hover,
+.menu-video-bg-btn:focus-visible {
+  background: rgba(5, 213, 255, 0.2);
+  border-color: #05d5ff;
+  color: #ffffff;
+  outline: 2px solid #ffffff;
+  outline-offset: -2px;
+}
+
+button.menu-video-bg-btn.is-active,
+.menu-video-bg-btn.is-active {
+  color: #ffe600;
+  border-color: rgba(255, 230, 0, 0.62);
+  background: linear-gradient(
+    90deg,
+    rgba(5, 213, 255, 0.2) 0%,
+    rgba(255, 230, 0, 0.18) 100%
+  );
+  box-shadow: 0 0 10px rgba(5, 213, 255, 0.24), 0 0 6px rgba(255, 230, 0, 0.2);
+}
+
+button.menu-video-bg-btn.is-active:hover,
+.menu-video-bg-btn.is-active:hover,
+button.menu-video-bg-btn.is-active:focus-visible,
+.menu-video-bg-btn.is-active:focus-visible {
+  color: #ffffff;
+  border-color: #ffe600;
+  background: linear-gradient(
+    90deg,
+    rgba(5, 213, 255, 0.3) 0%,
+    rgba(255, 230, 0, 0.28) 100%
+  );
+  outline: 2px solid #ffffff;
   outline-offset: -2px;
 }
 
@@ -1183,6 +1285,28 @@ button.menu-preview-btn,
   -webkit-line-clamp: 1;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+.track-video-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-family: var(--font-hud);
+  font-size: 9.5px;
+  font-weight: 800;
+  line-height: 1.2;
+  letter-spacing: 0.03em;
+  color: #ffe600;
+  background: linear-gradient(
+    90deg,
+    rgba(5, 213, 255, 0.2) 0%,
+    rgba(255, 230, 0, 0.18) 100%
+  );
+  border: 1px solid rgba(255, 230, 0, 0.52);
+  padding: 2px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .selected-pill {
@@ -2640,6 +2764,7 @@ button.menu-preview-btn,
 .loading-modal-backdrop {
   position: absolute;
   inset: 0;
+  z-index: 4;
   background: radial-gradient(circle at 50% 45%, rgba(12, 24, 44, 0.96), rgba(10, 14, 28, 0.98));
   display: flex;
   align-items: center;
@@ -3072,6 +3197,65 @@ button.menu-preview-btn,
   background: rgba(255, 255, 255, 0.06);
 }
 
+.video-bg-toggle-btn {
+  white-space: nowrap;
+  color: #c4d7f2;
+  border-color: rgba(255, 255, 255, 0.24);
+  background: rgba(255, 255, 255, 0.07);
+  transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease, box-shadow 0.14s ease;
+}
+
+.video-bg-toggle-btn:hover,
+.video-bg-toggle-btn:focus-visible {
+  color: #ffffff;
+  border-color: #05d5ff;
+  background: rgba(5, 213, 255, 0.2);
+  outline: 2px solid #ffffff;
+  outline-offset: -2px;
+}
+
+.video-bg-toggle-btn.active {
+  color: #ffe600;
+  border-color: rgba(255, 230, 0, 0.62);
+  background: linear-gradient(
+    90deg,
+    rgba(5, 213, 255, 0.2) 0%,
+    rgba(255, 230, 0, 0.18) 100%
+  );
+  box-shadow: 0 0 10px rgba(5, 213, 255, 0.22), inset 0 0 8px rgba(255, 230, 0, 0.12);
+}
+
+.video-bg-toggle-btn.active:hover,
+.video-bg-toggle-btn.active:focus-visible {
+  color: #ffffff;
+  border-color: #ffe600;
+  background: linear-gradient(
+    90deg,
+    rgba(5, 213, 255, 0.3) 0%,
+    rgba(255, 230, 0, 0.26) 100%
+  );
+}
+
+@media (min-width: 961px) and (min-height: 561px) {
+  .hud-actions-row:has(.video-bg-toggle-btn) {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .hud-actions-row:has(.video-bg-toggle-btn) > .sfx-mode-btn,
+  .hud-actions-row:has(.video-bg-toggle-btn) > .video-bg-toggle-btn {
+    flex: 1 1 calc(50% - 4px);
+    min-width: 0;
+    white-space: nowrap;
+  }
+
+  .hud-actions-row:has(.video-bg-toggle-btn) > .hud-btn:not(.sfx-mode-btn):not(.video-bg-toggle-btn) {
+    flex: 1 1 100%;
+    min-width: 0;
+    white-space: nowrap;
+  }
+}
+
 .menu-return-btn {
   width: 100%;
   flex: none;
@@ -3337,6 +3521,51 @@ button.menu-preview-btn,
   border-color: rgba(5, 213, 255, 0.4);
   color: #bceeff;
   white-space: nowrap;
+}
+
+.pause-pill-video-btn {
+  flex: 0 0 auto;
+  padding: 5px 11px;
+  font-size: 11.5px;
+  border-radius: 999px;
+  border-color: rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.08);
+  color: #cbd9f0;
+  white-space: nowrap;
+  transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease, box-shadow 0.14s ease;
+}
+
+.pause-pill-video-btn:hover,
+.pause-pill-video-btn:focus-visible {
+  background: rgba(5, 213, 255, 0.22);
+  border-color: #05d5ff;
+  color: #ffffff;
+  outline: 2px solid #ffffff;
+  outline-offset: -2px;
+}
+
+.pause-pill-video-btn.active {
+  border-color: rgba(255, 230, 0, 0.58);
+  background: linear-gradient(
+    90deg,
+    rgba(5, 213, 255, 0.2) 0%,
+    rgba(255, 230, 0, 0.18) 100%
+  );
+  color: #ffe600;
+  box-shadow: 0 0 10px rgba(5, 213, 255, 0.2);
+}
+
+.pause-pill-video-btn.active:hover,
+.pause-pill-video-btn.active:focus-visible {
+  border-color: #ffe600;
+  background: linear-gradient(
+    90deg,
+    rgba(5, 213, 255, 0.3) 0%,
+    rgba(255, 230, 0, 0.28) 100%
+  );
+  color: #ffffff;
+  outline: 2px solid #ffffff;
+  outline-offset: -2px;
 }
 
 .pause-pill-retry-btn,
@@ -4124,6 +4353,8 @@ button.menu-preview-btn,
   }
 
   .hud-actions-row {
+    flex-wrap: nowrap;
+    min-width: 0;
     gap: 6px;
   }
 
@@ -4530,6 +4761,20 @@ button.menu-preview-btn,
   }
 }
 
+@media (max-width: 768px) {
+  .pause-collapsed-pill {
+    max-width: 100%;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+    border-radius: 18px;
+  }
+
+  .pause-collapsed-pill > * {
+    max-width: 100%;
+  }
+}
+
 @media (max-width: 680px) {
   .track-section-header,
   .track-header-actions,
@@ -4561,6 +4806,7 @@ button.menu-preview-btn,
   }
 
   .menu-preview-btn,
+  .menu-video-bg-btn,
   .menu-audio-motion-bar .motion-toggle-chip,
   .pause-audio-settings-row .motion-toggle-chip {
     min-height: 24px;
@@ -4643,11 +4889,15 @@ button.menu-preview-btn,
   }
 
   .pause-pill-btn,
+  .pause-pill-video-btn,
   .pause-pill-retry-btn,
   .pause-collapsed-pill [data-testid='pause-pill-retry-btn'],
   .pause-pill-resume-btn {
     padding: 5px 10px;
     font-size: 11px;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .resume-countdown-card {
@@ -5040,6 +5290,23 @@ button.menu-preview-btn,
     overflow-y: visible;
   }
 
+  .track-item {
+    flex-wrap: wrap;
+    row-gap: 5px;
+    min-width: 0;
+  }
+
+  .track-meta {
+    min-width: 120px;
+    flex: 1 1 140px;
+  }
+
+  .track-record-badges {
+    flex-wrap: wrap;
+    flex-shrink: 1;
+    min-width: 0;
+  }
+
   .start-footer {
     margin-top: 6px;
   }
@@ -5088,6 +5355,27 @@ button.menu-preview-btn,
     gap: 5px;
   }
 
+  .pause-collapsed-pill {
+    max-width: 100%;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 6px;
+    padding: 5px 10px;
+    border-radius: 16px;
+  }
+
+  .pause-pill-btn,
+  .pause-pill-video-btn,
+  .pause-pill-retry-btn,
+  .pause-collapsed-pill [data-testid='pause-pill-retry-btn'],
+  .pause-pill-resume-btn {
+    padding: 4px 9px;
+    font-size: 11px;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
   .track-section-header,
   .track-header-actions,
   .menu-audio-motion-bar,
@@ -5115,6 +5403,16 @@ button.menu-preview-btn,
     min-width: 36px;
     max-width: none;
     flex: 1 1 44px;
+  }
+
+  .menu-preview-btn,
+  .menu-video-bg-btn,
+  .menu-audio-motion-bar .motion-toggle-chip,
+  .pause-audio-settings-row .motion-toggle-chip {
+    min-height: 24px;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .pause-audio-settings-row {
@@ -5312,6 +5610,7 @@ button.menu-preview-btn,
   .hud-actions-row {
     order: 4;
     flex: 1 1 120px;
+    flex-wrap: nowrap;
     min-width: 0;
     gap: 4px;
   }
@@ -5521,7 +5820,12 @@ button.menu-preview-btn,
 .app-shell[data-reduced-motion='true'] .hud-judgment-pop,
 .app-shell[data-reduced-motion='true'] .resume-countdown-digit,
 .app-shell[data-reduced-motion='true'] .hud-keycap,
-.app-shell[data-reduced-motion='true'] .skin-preview-svg {
+.app-shell[data-reduced-motion='true'] .skin-preview-svg,
+.app-shell[data-reduced-motion='true'] .bg-video-layer,
+.app-shell[data-reduced-motion='true'] .menu-video-bg-btn,
+.app-shell[data-reduced-motion='true'] .video-bg-toggle-btn,
+.app-shell[data-reduced-motion='true'] .video-bg-chip,
+.app-shell[data-reduced-motion='true'] .pause-pill-video-btn {
   animation: none !important;
   transition: none !important;
 }
@@ -5560,7 +5864,12 @@ button.menu-preview-btn,
   .app-shell:not([data-reduced-motion='false']) .hud-judgment-pop,
   .app-shell:not([data-reduced-motion='false']) .resume-countdown-digit,
   .app-shell:not([data-reduced-motion='false']) .hud-keycap,
-  .app-shell:not([data-reduced-motion='false']) .skin-preview-svg {
+  .app-shell:not([data-reduced-motion='false']) .skin-preview-svg,
+  .app-shell:not([data-reduced-motion='false']) .bg-video-layer,
+  .app-shell:not([data-reduced-motion='false']) .menu-video-bg-btn,
+  .app-shell:not([data-reduced-motion='false']) .video-bg-toggle-btn,
+  .app-shell:not([data-reduced-motion='false']) .video-bg-chip,
+  .app-shell:not([data-reduced-motion='false']) .pause-pill-video-btn {
     animation: none !important;
     transition: none !important;
   }

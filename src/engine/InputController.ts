@@ -11,6 +11,7 @@ export interface GameInputCommands {
   onActivateOverdrive: () => void;
   onCycleSfxMode: () => void;
   onToggleCinematicCamera: () => void;
+  onToggleVideoBackground?: () => void;
   onTogglePause: () => void;
   onExitToMenu: () => void;
   onReplayRun: () => void;
@@ -211,6 +212,9 @@ export class InputController {
           } else if (e.code === 'KeyC') {
             e.preventDefault();
             this.commands.onToggleCinematicCamera();
+          } else if (e.code === 'KeyV') {
+            e.preventDefault();
+            this.commands.onToggleVideoBackground?.();
           }
         }
         return;
@@ -222,6 +226,14 @@ export class InputController {
         if (!e.repeat) {
           e.preventDefault();
           this.commands.onToggleCinematicCamera();
+        }
+        return;
+      }
+
+      if (e.code === 'KeyV') {
+        if (!e.repeat) {
+          e.preventDefault();
+          this.commands.onToggleVideoBackground?.();
         }
         return;
       }

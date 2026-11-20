@@ -13,6 +13,7 @@ import {
   AudioLoadError,
   MAX_UPLOAD_BYTES,
   MIN_TRACK_SECONDS,
+  isVideoCandidateFile,
   matchAudioFormat,
   stripAudioExtension,
   type AudioFormat,
@@ -21,6 +22,7 @@ import { BUILT_IN_TRACKS, createFallbackBuffer } from './proceduralTracks';
 import { SfxSynth } from './SfxSynth';
 
 const BASE_SONG_GAIN = 0.85;
+const VIDEO_PROBE_TIMEOUT_MS = 4000;
 
 /**
  * Web Audio API Engine for ThorVG Rhythm Slasher (`rhythm-slasher-v6`).
@@ -30,6 +32,8 @@ const BASE_SONG_GAIN = 0.85;
  * - Click-free `triggerSidechainDuck()` on heavy `CHORD` / `RUSH` finishers
  */
 export class AudioEngine {
+  public static readonly MAX_CUSTOM_TRACK_CACHE = 3;
+
   public readonly sfx: SfxSynth = new SfxSynth();
 
   private ctx: AudioContext | null = null;
@@ -40,6 +44,11 @@ export class AudioEngine {
   private currentTrack: TrackMetadata = BUILT_IN_TRACKS[0]!;
   /** Decoded uploads keyed by track id, so starting a run does not decode the file twice. */
   private decodedUploads: Map<string, AudioBuffer> = new Map();
+  /** Video ObjectURLs owned by AudioEngine keyed by custom track id. */
+  private trackVideoUrls: Map<string, string> = new Map();
+  /** Oldest -> newest MRU order of custom track ids for bounded memory eviction. */
+  private customTrackOrder: string[] = [];
+  private customTrackSeq: number = 0;
 
   private fftBytes: Uint8Array<ArrayBuffer> = new Uint8Array(new ArrayBuffer(1024));
   private isPlaying: boolean = false;
@@ -198,6 +207,10 @@ export class AudioEngine {
         decoded = await ctx.decodeAudioData(await track.file.arrayBuffer());
         this.decodedUploads.set(track.id, decoded);
       }
+      if (track.hasVideo && track.videoUrl && !this.trackVideoUrls.has(track.id)) {
+        this.trackVideoUrls.set(track.id, track.videoUrl);
+      }
+      this.registerOrTouchCustomTrack(track.id);
       this.currentBuffer = decoded;
       this.currentTrack = {
         ...track,
@@ -224,10 +237,174 @@ export class AudioEngine {
     return this.currentTrack;
   }
 
+  private registerOrTouchCustomTrack(trackId: string): void {
+    const idx = this.customTrackOrder.indexOf(trackId);
+    if (idx !== -1) {
+      if (idx === this.customTrackOrder.length - 1) return;
+      this.customTrackOrder.splice(idx, 1);
+    }
+    this.customTrackOrder.push(trackId);
+  }
+
+  public touchCustomTrack(trackId: string): void {
+    const idx = this.customTrackOrder.indexOf(trackId);
+    if (idx === -1 || idx === this.customTrackOrder.length - 1) return;
+    this.customTrackOrder.splice(idx, 1);
+    this.customTrackOrder.push(trackId);
+  }
+
+  public revokeTrackMedia(trackId: string): void {
+    this.decodedUploads.delete(trackId);
+    const videoUrl = this.trackVideoUrls.get(trackId);
+    if (videoUrl) {
+      this.trackVideoUrls.delete(trackId);
+      try {
+        URL.revokeObjectURL(videoUrl);
+      } catch {
+        // Ignore revoke errors
+      }
+    }
+    const idx = this.customTrackOrder.indexOf(trackId);
+    if (idx !== -1) {
+      this.customTrackOrder.splice(idx, 1);
+    }
+    if (!this.isPlaying && this.currentTrack.id === trackId) {
+      this.currentBuffer = null;
+      if (this.pauseOffset <= 0) {
+        this.currentTrack = {
+          ...this.currentTrack,
+          file: undefined,
+          videoUrl: undefined,
+          hasVideo: false,
+        };
+      }
+    }
+  }
+
+  public evictOldCustomTracks(
+    keepIds: Iterable<string> = [],
+    maxCustomTracks: number = AudioEngine.MAX_CUSTOM_TRACK_CACHE
+  ): string[] {
+    const safeMax = Math.max(0, Math.floor(maxCustomTracks));
+    const protectedIds = new Set<string>(keepIds);
+    if (this.isPlaying || this.pauseOffset > 0) {
+      protectedIds.add(this.currentTrack.id);
+    }
+
+    const evictedIds: string[] = [];
+    while (this.customTrackOrder.length > safeMax) {
+      const candidate = this.customTrackOrder.find((id) => !protectedIds.has(id));
+      if (!candidate) {
+        break;
+      }
+      this.revokeTrackMedia(candidate);
+      evictedIds.push(candidate);
+    }
+    return evictedIds;
+  }
+
+  public disposeAllCustomMedia(): void {
+    for (const url of this.trackVideoUrls.values()) {
+      try {
+        URL.revokeObjectURL(url);
+      } catch {
+        // Ignore revoke errors
+      }
+    }
+    this.trackVideoUrls.clear();
+    for (const id of this.customTrackOrder) {
+      this.decodedUploads.delete(id);
+    }
+    for (const key of Array.from(this.decodedUploads.keys())) {
+      if (key.startsWith('custom-')) {
+        this.decodedUploads.delete(key);
+      }
+    }
+    this.customTrackOrder = [];
+    if (!this.isPlaying && this.currentTrack.isCustom) {
+      this.currentBuffer = null;
+      this.currentTrack = BUILT_IN_TRACKS[0]!;
+    }
+  }
+
+  private probeVideoStream(
+    file: File
+  ): Promise<{ hasVideo: boolean; videoUrl?: string }> {
+    if (
+      !isVideoCandidateFile(file) ||
+      typeof document === 'undefined' ||
+      typeof URL === 'undefined' ||
+      typeof URL.createObjectURL !== 'function'
+    ) {
+      return Promise.resolve({ hasVideo: false, videoUrl: undefined });
+    }
+
+    let objectUrl: string;
+    try {
+      objectUrl = URL.createObjectURL(file);
+    } catch {
+      return Promise.resolve({ hasVideo: false, videoUrl: undefined });
+    }
+
+    return new Promise<{ hasVideo: boolean; videoUrl?: string }>((resolve) => {
+      const video = document.createElement('video');
+      video.preload = 'metadata';
+      video.muted = true;
+      video.defaultMuted = true;
+      video.playsInline = true;
+
+      let settled = false;
+
+      const cleanupProbeElement = () => {
+        video.onloadedmetadata = null;
+        video.onerror = null;
+        try {
+          video.pause();
+          video.removeAttribute('src');
+          video.load();
+        } catch {
+          // Ignore detached video cleanup errors
+        }
+      };
+
+      const finish = (hasVideo: boolean) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutId);
+        cleanupProbeElement();
+        if (hasVideo) {
+          resolve({ hasVideo: true, videoUrl: objectUrl });
+        } else {
+          try {
+            URL.revokeObjectURL(objectUrl);
+          } catch {
+            // Ignore revoke errors
+          }
+          resolve({ hasVideo: false, videoUrl: undefined });
+        }
+      };
+
+      const timeoutId = setTimeout(() => {
+        finish(false);
+      }, VIDEO_PROBE_TIMEOUT_MS);
+
+      video.onloadedmetadata = () => {
+        const validStream = video.videoWidth > 0 && video.videoHeight > 0;
+        finish(validStream);
+      };
+
+      video.onerror = () => {
+        finish(false);
+      };
+
+      video.src = objectUrl;
+    });
+  }
+
   /**
    * Validates and decodes a user-uploaded file without touching the current track.
-   * Order: size -> format -> decode -> duration. Throws `AudioLoadError` on failure,
-   * leaving `currentBuffer` / `currentTrack` unchanged.
+   * Order: size -> format -> decode -> duration -> detached video stream probe.
+   * Throws `AudioLoadError` on failure, leaving `currentBuffer` / `currentTrack` unchanged.
    */
   public async decodeLocalFile(
     file: File,
@@ -252,8 +429,14 @@ export class AudioEngine {
       throw new AudioLoadError('too_short');
     }
 
-    const id = `custom-${Date.now()}`;
+    const { hasVideo, videoUrl } = await this.probeVideoStream(file);
+    const id = `custom-${Date.now()}-${++this.customTrackSeq}`;
     this.decodedUploads.set(id, decoded);
+    if (hasVideo && videoUrl) {
+      this.trackVideoUrls.set(id, videoUrl);
+    }
+    this.registerOrTouchCustomTrack(id);
+
     return {
       id,
       title: stripAudioExtension(file.name),
@@ -262,6 +445,8 @@ export class AudioEngine {
       durationSec: Math.max(1, Math.round(decoded.duration)),
       isCustom: true,
       file,
+      hasVideo,
+      videoUrl,
     };
   }
 

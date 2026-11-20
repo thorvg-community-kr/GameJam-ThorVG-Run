@@ -606,8 +606,12 @@ export class ThorVGRenderer {
     // Linear up to 48x so calm close-up (1.42x) * 20.0x paused user zoom (28.4x) has 0.0px error
     const ts = (s: number) => s * Math.min(zoom, 48);
 
-    // 1. Background
+    // 1. Background (Opaque #070914 in default mode; translucent beat-reactive dark scrim in video mode)
     const pulseBoost = Math.floor((frequency.low * 0.6 + (state.beatPulse ?? 0) * 0.5) * 28);
+    const videoBgActive = Boolean(state.videoBackgroundActive);
+    const bgAlpha = videoBgActive
+      ? Math.min(148, 128 + Math.round((state.beatPulse ?? 0) * 20))
+      : 255;
     shapes.bg
       .reset()
       .appendRect(0, 0, width, height)
@@ -615,7 +619,7 @@ export class ThorVGRenderer {
         7 + Math.floor(pulseBoost * 0.5),
         9 + Math.floor(pulseBoost * 0.3),
         20 + pulseBoost,
-        255
+        bgAlpha
       );
 
     // 2. Dynamic Speed Grid (Inverse-projected full-viewport adaptive vector grid)
@@ -640,8 +644,8 @@ export class ThorVGRenderer {
       shapes.grid.moveTo(0, sy).lineTo(width, sy);
     }
     shapes.grid.stroke({
-      width: 1,
-      color: [40, 65, 110, 82],
+      width: videoBgActive ? 1.15 : 1,
+      color: videoBgActive ? [62, 108, 168, 104] : [40, 65, 110, 82],
     });
 
     // `renderMacroWorldPass` resets all world layers including `shapes.reticles.reset().fill(0, 0, 0, 0)`

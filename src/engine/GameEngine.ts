@@ -167,6 +167,7 @@ export class GameEngine {
   // Dynamic Vector Cinematic Camera & Non-Freezing Hitstop State (`[Fix 2]`)
   private cinematicCamera: boolean = true;
   private reducedMotion: boolean = false;
+  private videoBackgroundActive: boolean = false;
   private cinematicZoom: number = 1.0;
   private impactZoomPunch: number = 0;
   private hitstopTimer: number = 0;
@@ -329,6 +330,45 @@ export class GameEngine {
 
   public getReducedMotion(): boolean {
     return this.reducedMotion;
+  }
+
+  public setVideoBackgroundActive(active: boolean): void {
+    const next = Boolean(active);
+    if (this.videoBackgroundActive === next) return;
+    this.videoBackgroundActive = next;
+    this.hudDirty = true;
+    if (this.running && this.paused) {
+      if (this.resumeCountdownSec > 0) {
+        this.terrain.update(
+          this.cameraX,
+          this.width,
+          this.height,
+          this.elapsedSec,
+          this.pausedFreq,
+          this.computeViewWorldBounds(true)
+        );
+        this.renderCurrentState(this.pausedAudioSec, this.pausedFreq);
+        this.publishHud(this.audio.getProgress(), this.lastSpeedMultiplier, false);
+      } else {
+        this.refreshPausedView(true);
+      }
+    } else if (!this.running && this.finishRecorded && this.activeBlueprint) {
+      this.renderCurrentState(this.finishedAudioSec, this.pausedFreq);
+    }
+  }
+
+  public getVideoBackgroundActive(): boolean {
+    return this.videoBackgroundActive;
+  }
+
+  public getCurrentVideoSyncSec(): number {
+    if (!this.running) {
+      return this.finishRecorded ? Math.max(0, this.finishedAudioSec) : 0;
+    }
+    if (this.paused) {
+      return Math.max(0, this.pausedAudioSec);
+    }
+    return Math.max(0, this.getRunEffectiveAudioSec());
   }
 
   private getRunEffectiveAudioSec(): number {
@@ -668,6 +708,7 @@ export class GameEngine {
     this.hitstopCooldownTimer = 0;
     this.prevRenderCameraX = this.cameraX;
     this.impactZoomPunch = 0;
+    this.videoBackgroundActive = false;
     cancelAnimationFrame(this.rafId);
     cancelAnimationFrame(this.pausedRenderRaf);
     this.pausedRenderRaf = 0;
@@ -2694,6 +2735,7 @@ export class GameEngine {
       afterimages: this.vfx.getAfterimages(),
       particles: this.vfx.getParticles(),
       slashes: this.vfx.getSlashes(),
+      videoBackgroundActive: this.videoBackgroundActive,
     });
   }
 
@@ -2761,6 +2803,7 @@ export class GameEngine {
       rushCombo: this.activeRushCombo > 0 ? this.activeRushCombo : undefined,
       audioOffsetMs: this.audio.getAudioOffsetMs(),
       resumeCountdown,
+      videoBackgroundActive: this.videoBackgroundActive,
     });
   }
 

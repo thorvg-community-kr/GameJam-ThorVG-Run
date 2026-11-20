@@ -10,10 +10,13 @@ export interface PauseOverlayProps {
   bgmVolume: number;
   sfxVolume: number;
   reducedMotion: boolean;
+  hasVideo: boolean;
+  videoBgEnabled: boolean;
   onChangeAudioOffset: (nextOffsetMs: number) => void;
   onChangeBgmVolume: (volume: number) => void;
   onChangeSfxVolume: (volume: number) => void;
   onToggleReducedMotion: () => void;
+  onToggleVideoBg: () => void;
   onResume: () => void;
   onQuickRetry: () => void;
   onReturnToMenu: () => void;
@@ -46,10 +49,13 @@ export const PauseOverlay: React.FC<PauseOverlayProps> = ({
   bgmVolume,
   sfxVolume,
   reducedMotion,
+  hasVideo,
+  videoBgEnabled,
   onChangeAudioOffset,
   onChangeBgmVolume,
   onChangeSfxVolume,
   onToggleReducedMotion,
+  onToggleVideoBg,
   onResume,
   onQuickRetry,
   onReturnToMenu,
@@ -62,6 +68,13 @@ export const PauseOverlay: React.FC<PauseOverlayProps> = ({
   const isCoarsePointer = useCoarsePointer();
   const ctrlGuide = isCoarsePointer ? t.menu.controlsTouch : t.menu.controls;
   const retryLabel = isCoarsePointer ? t.pause.retryTouchBtn : t.pause.retryBtn;
+  const pillVideoLabel = isCoarsePointer
+    ? videoBgEnabled
+      ? t.hud.videoBgOnTouch
+      : t.hud.videoBgOffTouch
+    : videoBgEnabled
+      ? t.hud.videoBgOn
+      : t.hud.videoBgOff;
   const [collapsed, setCollapsed] = useState(false);
 
   const currentZoom = hud.userZoom ?? 1.0;
@@ -90,6 +103,18 @@ export const PauseOverlay: React.FC<PauseOverlayProps> = ({
           <span className="pause-pill-zoom" data-testid="pause-zoom-readout">
             🔍 {formatZoom(currentZoom)}
           </span>
+          {hasVideo && (
+            <button
+              type="button"
+              data-testid="pause-pill-video-bg-btn"
+              aria-pressed={videoBgEnabled}
+              title={t.hud.videoBgTitle}
+              className={`hud-btn pause-pill-btn pause-pill-video-btn${videoBgEnabled ? ' active' : ''}`}
+              onClick={onToggleVideoBg}
+            >
+              {pillVideoLabel}
+            </button>
+          )}
           <button
             type="button"
             data-testid="pause-expand-btn"
@@ -253,6 +278,18 @@ export const PauseOverlay: React.FC<PauseOverlayProps> = ({
             >
               {reducedMotion ? t.pause.reducedMotionOn : t.pause.reducedMotionOff}
             </button>
+            {hasVideo && (
+              <button
+                type="button"
+                className={`motion-toggle-chip video-bg-chip${videoBgEnabled ? ' active' : ''}`}
+                data-testid="pause-video-bg-toggle-btn"
+                aria-pressed={videoBgEnabled}
+                title={t.menu.videoBgTipTitle}
+                onClick={onToggleVideoBg}
+              >
+                {videoBgEnabled ? t.pause.videoBgOn : t.pause.videoBgOff}
+              </button>
+            )}
           </div>
 
           {/* Row 4: ThorVG Vector Zoom & Live CPU/GPU Compare */}

@@ -38,6 +38,7 @@ interface StartScreenProps {
   bgmVolume: number;
   sfxVolume: number;
   reducedMotion: boolean;
+  videoBgEnabled: boolean;
   engineReady: boolean;
   step: MenuStep;
   isGuideOpen: boolean;
@@ -45,13 +46,17 @@ interface StartScreenProps {
   onCloseGuide: () => void;
   onStepChange: (step: MenuStep) => void;
   onSelectTrack: (track: TrackMetadata) => void;
-  onUploadFile: (file: File, supportedFormats: readonly AudioFormat[]) => Promise<void>;
+  onUploadFile: (
+    file: File,
+    supportedFormats: readonly AudioFormat[]
+  ) => Promise<TrackMetadata | undefined>;
   onSelectRenderer: (mode: RendererMode) => void;
   onSelectDifficulty: (difficulty: DifficultyMode) => void;
   onSelectSkin: (skin: CrewmateSkinId) => void;
   onChangeBgmVolume: (volume: number) => void;
   onChangeSfxVolume: (volume: number) => void;
   onToggleReducedMotion: () => void;
+  onToggleVideoBg: () => void;
   onStartRun: () => void;
 }
 
@@ -100,6 +105,7 @@ export const StartScreen: React.FC<StartScreenProps> = ({
   bgmVolume,
   sfxVolume,
   reducedMotion,
+  videoBgEnabled,
   engineReady,
   step,
   isGuideOpen,
@@ -114,6 +120,7 @@ export const StartScreen: React.FC<StartScreenProps> = ({
   onChangeBgmVolume,
   onChangeSfxVolume,
   onToggleReducedMotion,
+  onToggleVideoBg,
   onStartRun,
 }) => {
   const { lang, setLang, t, format } = useI18n();
@@ -403,8 +410,11 @@ export const StartScreen: React.FC<StartScreenProps> = ({
     const extraNote = files.length > 1 ? ` ${t.upload.firstOnly}` : '';
     setUploadStatus(format(t.upload.analyzing, { name: file.name }));
     try {
-      await onUploadFile(file, supportedFormats);
-      setUploadStatus(format(t.upload.loaded, { name: file.name }) + extraNote);
+      const uploaded = await onUploadFile(file, supportedFormats);
+      setUploadStatus(
+        format(uploaded?.hasVideo ? t.upload.loadedVideo : t.upload.loaded, { name: file.name }) +
+          extraNote
+      );
     } catch (err) {
       const code = err instanceof AudioLoadError ? err.code : 'decode_failed';
       setUploadStatus(
@@ -429,6 +439,14 @@ export const StartScreen: React.FC<StartScreenProps> = ({
     body: t.menu.previewTipBody,
     meta: `${currentTrackTitle} · ${Math.round(selectedTrack.bpm)} BPM · ${formatDurationMmSs(selectedTrack.durationSec)}`,
     accentHex: isPreviewPlaying ? '#FFE600' : '#05D5FF',
+  };
+
+  const videoBgTip: MenuTooltipData = {
+    id: 'track-video-bg',
+    title: t.menu.videoBgTipTitle,
+    body: t.menu.videoBgTipBody,
+    meta: videoBgEnabled ? t.menu.videoBgOnBtn : t.menu.videoBgOffBtn,
+    accentHex: videoBgEnabled ? '#05D5FF' : '#94A3B8',
   };
 
   const reducedMotionTip: MenuTooltipData = {
@@ -834,6 +852,28 @@ export const StartScreen: React.FC<StartScreenProps> = ({
                     <div className="track-section-header">
                       <h2>{t.menu.trackSection}</h2>
                       <div className="track-header-actions">
+                        {Boolean(selectedTrack.hasVideo) && (
+                          <button
+                            type="button"
+                            className={`menu-video-bg-btn${videoBgEnabled ? ' is-active' : ''}`}
+                            data-testid="menu-video-bg-toggle-btn"
+                            aria-pressed={videoBgEnabled}
+                            {...bindHoverTip(videoBgTip)}
+                            onClick={(e) => {
+                              const nextEnabled = !videoBgEnabled;
+                              onToggleVideoBg();
+                              if (activeTip?.id === videoBgTip.id) {
+                                showTip(e.currentTarget, {
+                                  ...videoBgTip,
+                                  meta: nextEnabled ? t.menu.videoBgOnBtn : t.menu.videoBgOffBtn,
+                                  accentHex: nextEnabled ? '#05D5FF' : '#94A3B8',
+                                });
+                              }
+                            }}
+                          >
+                            {videoBgEnabled ? t.menu.videoBgOnBtn : t.menu.videoBgOffBtn}
+                          </button>
+                        )}
                         <button
                           type="button"
                           className={`menu-preview-btn${isPreviewPlaying ? ' is-playing' : ''}`}
@@ -858,16 +898,18 @@ export const StartScreen: React.FC<StartScreenProps> = ({
                         const roundedBpm = Math.round(track.bpm);
                         const durationText = formatDurationMmSs(track.durationSec);
                         const rec = getTrackRecord(track, difficulty);
+                        const trackTipTemplate = track.hasVideo
+                          ? t.menu.trackTipCustomVideo
+                          : track.isCustom
+                            ? t.menu.trackTipCustom
+                            : t.menu.trackTipBuiltIn;
                         const trackTip: MenuTooltipData = {
                           id: `track-${track.id}`,
                           title,
-                          body: `${artist} · ${format(
-                            track.isCustom ? t.menu.trackTipCustom : t.menu.trackTipBuiltIn,
-                            {
-                              bpm: roundedBpm,
-                              duration: durationText,
-                            }
-                          )}`,
+                          body: `${artist} · ${format(trackTipTemplate, {
+                            bpm: roundedBpm,
+                            duration: durationText,
+                          })}`,
                           meta: rec
                             ? `${t.difficulties[difficulty].shortName} · ${format(
                                 t.menu.bestRecord,
@@ -926,6 +968,14 @@ export const StartScreen: React.FC<StartScreenProps> = ({
                                   <span className="pb-nomiss-pill">{t.menu.noMissBadge}</span>
                                 )}
                               </div>
+                            )}
+                            {track.hasVideo && (
+                              <span
+                                className="track-video-badge"
+                                data-testid={`track-video-badge-${track.id}`}
+                              >
+                                {t.menu.videoBadge}
+                              </span>
                             )}
                             {isSelected && <span className="selected-pill">{t.menu.selected}</span>}
                             <span className="menu-hover-cue" aria-hidden="true">
