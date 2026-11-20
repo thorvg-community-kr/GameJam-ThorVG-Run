@@ -10,14 +10,22 @@ import { TrackLoadingModal } from './components/TrackLoadingModal';
 import { GameEngine } from './engine/GameEngine';
 import { InputController } from './engine/InputController';
 import {
+  hasExplicitReducedMotionPref,
   loadAudioOffsetMs,
+  loadBgmVolume,
   loadGuideDismissed,
+  loadReducedMotion,
   loadSelectedSkin,
   loadSelectedTrackId,
+  loadSfxVolume,
   saveAudioOffsetMs,
+  saveBgmVolume,
+  saveReducedMotion,
   saveSelectedSkin,
   saveSelectedTrackId,
+  saveSfxVolume,
 } from './engine/recordsStore';
+import { useCoarsePointer } from './hooks/useCoarsePointer';
 import { trackTitle } from './i18n/display';
 import { useI18n } from './i18n/I18nProvider';
 import { ThorVGRenderer } from './renderer/ThorVGRenderer';
@@ -54,11 +62,11 @@ const INITIAL_HUD: HUDTelemetry = {
   zoomDisplay: 1.0,
   cinematicCamera: true,
   score: 0,
-  combo: 1,
-  maxCombo: 1,
+  combo: 0,
+  maxCombo: 0,
   progress: 0,
   activeForm: 'synth',
-  resonanceGauge: 40,
+  resonanceGauge: 35,
   grooveHp: 100,
   maxGrooveHp: 100,
   overdriveReady: false,
@@ -87,12 +95,14 @@ const INITIAL_HUD: HUDTelemetry = {
   chordKeyFlash: false,
   rushCombo: 0,
   audioOffsetMs: 0,
+  resumeCountdown: null,
 };
 
 type Screen = 'splash' | 'menu' | 'loading' | 'game';
 
 export const App: React.FC = () => {
   const { t } = useI18n();
+  const isCoarsePointer = useCoarsePointer();
   const [rendererMode, setRendererMode] = useState<RendererMode>('sw');
   const [selectedTrack, setSelectedTrack] = useState<TrackMetadata>(() => {
     const savedId = loadSelectedTrackId();
@@ -113,6 +123,9 @@ export const App: React.FC = () => {
   const [isGuideOpen, setIsGuideOpen] = useState<boolean>(false);
   const [selectedSkin, setSelectedSkin] = useState<CrewmateSkinId>(() => loadSelectedSkin());
   const [audioOffsetMs, setAudioOffsetMs] = useState<number>(() => loadAudioOffsetMs());
+  const [bgmVolume, setBgmVolume] = useState<number>(() => loadBgmVolume());
+  const [sfxVolume, setSfxVolume] = useState<number>(() => loadSfxVolume());
+  const [reducedMotion, setReducedMotion] = useState<boolean>(() => loadReducedMotion());
   const [engineReady, setEngineReady] = useState<boolean>(false);
   /** Increments each time a renderer finishes init, so loops can restart on the new instance. */
   const [rendererEpoch, setRendererEpoch] = useState<number>(0);
@@ -155,6 +168,12 @@ export const App: React.FC = () => {
   selectedSkinRef.current = selectedSkin;
   const audioOffsetMsRef = useRef<number>(audioOffsetMs);
   audioOffsetMsRef.current = audioOffsetMs;
+  const bgmVolumeRef = useRef<number>(bgmVolume);
+  bgmVolumeRef.current = bgmVolume;
+  const sfxVolumeRef = useRef<number>(sfxVolume);
+  sfxVolumeRef.current = sfxVolume;
+  const reducedMotionRef = useRef<boolean>(reducedMotion);
+  reducedMotionRef.current = reducedMotion;
   const finishedAtRef = useRef<number>(0);
   const inGameRef = useRef<boolean>(inGame);
   inGameRef.current = inGame;
@@ -193,6 +212,7 @@ export const App: React.FC = () => {
     engine.setCinematicCamera(cinematicCameraRef.current);
     engine.setSelectedSkin(selectedSkinRef.current);
     engine.setAudioOffsetMs(audioOffsetMsRef.current);
+    engine.setReducedMotion(reducedMotionRef.current);
     gameEngineRef.current = engine;
   }
 
@@ -210,6 +230,84 @@ export const App: React.FC = () => {
     audioOffsetMsRef.current = audioOffsetMs;
     gameEngineRef.current?.setAudioOffsetMs(audioOffsetMs);
   }, [audioOffsetMs]);
+
+  useEffect(() => {
+    bgmVolumeRef.current = bgmVolume;
+    if (audioRef.current && Math.abs(audioRef.current.getBgmVolume() - bgmVolume) > 1e-6) {
+      audioRef.current.setBgmVolume(bgmVolume);
+    }
+    if (
+      gameEngineRef.current &&
+      Math.abs(gameEngineRef.current.getBgmVolume() - bgmVolume) > 1e-6
+    ) {
+      gameEngineRef.current.setBgmVolume(bgmVolume);
+    }
+  }, [bgmVolume]);
+
+  useEffect(() => {
+    sfxVolumeRef.current = sfxVolume;
+    if (audioRef.current && Math.abs(audioRef.current.getSfxVolume() - sfxVolume) > 1e-6) {
+      audioRef.current.setSfxVolume(sfxVolume);
+    }
+    if (
+      gameEngineRef.current &&
+      Math.abs(gameEngineRef.current.getSfxVolume() - sfxVolume) > 1e-6
+    ) {
+      gameEngineRef.current.setSfxVolume(sfxVolume);
+    }
+  }, [sfxVolume]);
+
+  useEffect(() => {
+    reducedMotionRef.current = reducedMotion;
+    gameEngineRef.current?.setReducedMotion(reducedMotion);
+  }, [reducedMotion]);
+
+  // Live OS prefers-reduced-motion sync when user has not explicitly overridden the preference
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return;
+    }
+    const mql = window.matchMedia('(prefers-reduced-motion: reduce)');
+    if (!hasExplicitReducedMotionPref()) {
+      reducedMotionRef.current = mql.matches;
+      setReducedMotion(mql.matches);
+      gameEngineRef.current?.setReducedMotion(mql.matches);
+    }
+    const handleChange = (event: MediaQueryListEvent) => {
+      if (hasExplicitReducedMotionPref()) return;
+      reducedMotionRef.current = event.matches;
+      setReducedMotion(event.matches);
+      gameEngineRef.current?.setReducedMotion(event.matches);
+    };
+    if (typeof mql.addEventListener === 'function') {
+      mql.addEventListener('change', handleChange);
+      return () => mql.removeEventListener('change', handleChange);
+    }
+    mql.addListener(handleChange);
+    return () => mql.removeListener(handleChange);
+  }, []);
+
+  // Auto-pause active gameplay or active 3-2-1 resume countdown on tab hide / window blur / pagehide
+  useEffect(() => {
+    const autoPauseIfActive = () => {
+      if (inGameRef.current && !isFinishedRef.current) {
+        gameEngineRef.current?.pauseRun();
+      }
+    };
+    const onVisibilityChange = () => {
+      if (document.hidden || document.visibilityState === 'hidden') {
+        autoPauseIfActive();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('blur', autoPauseIfActive);
+    window.addEventListener('pagehide', autoPauseIfActive);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('blur', autoPauseIfActive);
+      window.removeEventListener('pagehide', autoPauseIfActive);
+    };
+  }, []);
 
   useEffect(() => {
     if (hud.isFinished) {
@@ -245,6 +343,7 @@ export const App: React.FC = () => {
         gameEngineRef.current?.setCinematicCamera(cinematicCameraRef.current);
         gameEngineRef.current?.setSelectedSkin(selectedSkinRef.current);
         gameEngineRef.current?.setAudioOffsetMs(audioOffsetMsRef.current);
+        gameEngineRef.current?.setReducedMotion(reducedMotionRef.current);
         gameEngineRef.current?.attachRenderer(renderer, rendererMode, w, h);
         setEngineReady(true);
         setRendererEpoch((n) => n + 1);
@@ -331,7 +430,13 @@ export const App: React.FC = () => {
     finishedAtRef.current = 0;
     gameEngineRef.current?.stopRun();
     rendererRef.current?.clearForTransition();
-    setHud((prev) => ({ ...prev, isPaused: false, userZoom: 1.0, isPanned: false }));
+    setHud((prev) => ({
+      ...prev,
+      isPaused: false,
+      resumeCountdown: null,
+      userZoom: 1.0,
+      isPanned: false,
+    }));
     setMenuStep('track');
     setScreen('menu');
   }, []);
@@ -367,6 +472,33 @@ export const App: React.FC = () => {
     audioOffsetMsRef.current = clamped;
     setAudioOffsetMs(clamped);
     gameEngineRef.current?.setAudioOffsetMs(clamped);
+  }, []);
+
+  const handleChangeBgmVolume = useCallback((next: number) => {
+    const applied = audioRef.current
+      ? audioRef.current.setBgmVolume(next)
+      : saveBgmVolume(next);
+    bgmVolumeRef.current = applied;
+    setBgmVolume(applied);
+    gameEngineRef.current?.setBgmVolume(applied);
+  }, []);
+
+  const handleChangeSfxVolume = useCallback((next: number) => {
+    const applied = audioRef.current
+      ? audioRef.current.setSfxVolume(next)
+      : saveSfxVolume(next);
+    sfxVolumeRef.current = applied;
+    setSfxVolume(applied);
+    gameEngineRef.current?.setSfxVolume(applied);
+  }, []);
+
+  const handleToggleReducedMotion = useCallback(() => {
+    setReducedMotion((prev) => {
+      const next = saveReducedMotion(!prev);
+      reducedMotionRef.current = next;
+      gameEngineRef.current?.setReducedMotion(next);
+      return next;
+    });
   }, []);
 
   const handleToggleCinematicCamera = useCallback(() => {
@@ -417,6 +549,7 @@ export const App: React.FC = () => {
     engine.setCinematicCamera(cinematicCamera);
     engine.setSelectedSkin(selectedSkinRef.current);
     engine.setAudioOffsetMs(audioOffsetMsRef.current);
+    engine.setReducedMotion(reducedMotionRef.current);
     setHud((prev) => ({
       ...INITIAL_HUD,
       grooveHp: 100,
@@ -444,13 +577,28 @@ export const App: React.FC = () => {
           difficulty
         );
         if (launchSeqRef.current !== seq) return;
+        let resolvedTrack = selectedTrack;
+        if (selectedTrack.isCustom && Number.isFinite(blueprint.bpm) && blueprint.bpm > 0) {
+          const detectedBpm = Math.round(blueprint.bpm);
+          if (detectedBpm !== selectedTrack.bpm) {
+            resolvedTrack = { ...selectedTrack, bpm: detectedBpm };
+            setCustomTracks((prev) =>
+              prev.map((item) =>
+                item.id === selectedTrack.id ? { ...item, bpm: detectedBpm } : item
+              )
+            );
+            setSelectedTrack((prev) =>
+              prev.id === selectedTrack.id ? { ...prev, bpm: detectedBpm } : prev
+            );
+          }
+        }
         setLoadingState({ progress: 1.0, stage: 'ready', blueprint });
 
         // Brief hold at 100% so the player can see the pre-computed track waveform minimap
         await new Promise((r) => setTimeout(r, 480));
         if (launchSeqRef.current !== seq) return;
 
-        const runPromise = engine.startRun(selectedTrack, undefined, difficulty);
+        const runPromise = engine.startRun(resolvedTrack, undefined, difficulty);
         setLaunchKey((k) => k + 1);
         setScreen('game');
         await runPromise;
@@ -465,6 +613,28 @@ export const App: React.FC = () => {
 
   const handleStartRunRef = useRef(handleStartRun);
   handleStartRunRef.current = handleStartRun;
+
+  const handleQuickRetry = useCallback(() => {
+    const engine = gameEngineRef.current;
+    if (!engine) return;
+    audioRef.current?.unlockFromGesture();
+    launchSeqRef.current++;
+    finishedAtRef.current = 0;
+    if (engine.hasPreparedBlueprint(selectedTrack, difficulty)) {
+      engine.setCinematicCamera(cinematicCameraRef.current);
+      engine.setSelectedSkin(selectedSkinRef.current);
+      engine.setAudioOffsetMs(audioOffsetMsRef.current);
+      engine.setReducedMotion(reducedMotionRef.current);
+      setLaunchKey((k) => k + 1);
+      setScreen('game');
+      void engine.restartCurrentRun();
+    } else {
+      handleStartRun();
+    }
+  }, [difficulty, handleStartRun, selectedTrack]);
+
+  const handleQuickRetryRef = useRef(handleQuickRetry);
+  handleQuickRetryRef.current = handleQuickRetry;
 
   // Command-Pattern InputController binding 2-Lane Katana Slasher keyboard & pointer controls once
   useEffect(() => {
@@ -502,6 +672,9 @@ export const App: React.FC = () => {
         }
         void handleStartRunRef.current();
       },
+      onQuickRetry: () => {
+        handleQuickRetryRef.current();
+      },
       onWheelZoom: (factor, canvasX, canvasY) => {
         gameEngineRef.current?.zoomByFactor(factor, canvasX, canvasY);
       },
@@ -535,8 +708,9 @@ export const App: React.FC = () => {
     <div
       ref={shellRef}
       className="app-shell"
+      data-reduced-motion={reducedMotion ? 'true' : 'false'}
       onContextMenu={(e) => {
-        if (inGame && !hud.isPaused && !hud.isFinished) {
+        if (inGame && (!hud.isPaused || Boolean(hud.resumeCountdown)) && !hud.isFinished) {
           e.preventDefault();
         }
       }}
@@ -546,7 +720,7 @@ export const App: React.FC = () => {
         key={rendererMode}
         ref={canvasRef}
         id="tvg-canvas"
-        className={`tvg-canvas${inGame && hud.isPaused && !hud.isFinished ? ' paused-inspectable' : ''}`}
+        className={`tvg-canvas${inGame && hud.isPaused && !hud.resumeCountdown && !hud.isFinished ? ' paused-inspectable' : ''}`}
       />
 
       {screen === 'menu' && (
@@ -556,6 +730,9 @@ export const App: React.FC = () => {
           rendererMode={rendererMode}
           difficulty={difficulty}
           selectedSkin={selectedSkin}
+          bgmVolume={bgmVolume}
+          sfxVolume={sfxVolume}
+          reducedMotion={reducedMotion}
           engineReady={engineReady}
           step={menuStep}
           isGuideOpen={isGuideOpen}
@@ -567,6 +744,9 @@ export const App: React.FC = () => {
           onSelectRenderer={setRendererMode}
           onSelectDifficulty={handleSelectDifficulty}
           onSelectSkin={handleSelectSkin}
+          onChangeBgmVolume={handleChangeBgmVolume}
+          onChangeSfxVolume={handleChangeSfxVolume}
+          onToggleReducedMotion={handleToggleReducedMotion}
           onStartRun={handleStartRun}
         />
       )}
@@ -578,7 +758,7 @@ export const App: React.FC = () => {
         />
       )}
 
-      {inGame && !hud.isPaused && !hud.isFinished && (
+      {inGame && (!hud.isPaused || Boolean(hud.resumeCountdown)) && !hud.isFinished && (
         <InGameHUD
           hud={hud}
           trackTitle={trackTitle(t, selectedTrack)}
@@ -600,19 +780,49 @@ export const App: React.FC = () => {
         />
       )}
 
-      {inGame && Boolean(hud.isPaused) && !hud.isFinished && (
+      {inGame && Boolean(hud.isPaused) && !hud.resumeCountdown && !hud.isFinished && (
         <PauseOverlay
           hud={hud}
           trackTitle={trackTitle(t, selectedTrack)}
           audioOffsetMs={audioOffsetMs}
+          bgmVolume={bgmVolume}
+          sfxVolume={sfxVolume}
+          reducedMotion={reducedMotion}
           onChangeAudioOffset={handleChangeAudioOffset}
+          onChangeBgmVolume={handleChangeBgmVolume}
+          onChangeSfxVolume={handleChangeSfxVolume}
+          onToggleReducedMotion={handleToggleReducedMotion}
           onResume={handleResumeRun}
+          onQuickRetry={handleQuickRetry}
           onReturnToMenu={handleReturnToMenu}
           onSetZoom={handleSetZoom}
           onStepZoom={handleStepZoom}
           onResetView={handleResetView}
           onToggleRenderer={(nextMode) => setRendererMode(nextMode)}
         />
+      )}
+
+      {inGame && Boolean(hud.resumeCountdown) && !hud.isFinished && (
+        <div
+          className="resume-countdown-overlay"
+          data-testid="resume-countdown-overlay"
+          role="status"
+          aria-live="assertive"
+        >
+          <div className="resume-countdown-card">
+            <span className="resume-countdown-eyebrow">{t.hud.resumeCountdownLabel}</span>
+            <strong
+              key={hud.resumeCountdown}
+              className="resume-countdown-digit"
+              data-testid="resume-countdown-digit"
+            >
+              {hud.resumeCountdown}
+            </strong>
+            <small className="resume-countdown-hint">
+              {isCoarsePointer ? t.hud.resumeCountdownTouchHint : t.hud.resumeCountdownHint}
+            </small>
+          </div>
+        </div>
       )}
 
       {inGame && launchKey > 0 && (

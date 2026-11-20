@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AudioLoadError,
   MAX_UPLOAD_MB,
@@ -11,7 +11,7 @@ import {
 import { BUILT_IN_TRACKS } from '../audio/proceduralTracks';
 import { getTrackRecord } from '../engine/recordsStore';
 import { useCoarsePointer } from '../hooks/useCoarsePointer';
-import { trackArtist, trackTitle } from '../i18n/display';
+import { formatDurationMmSs, trackArtist, trackTitle } from '../i18n/display';
 import { useI18n } from '../i18n/I18nProvider';
 import { LANGUAGE_LABELS, type Lang } from '../i18n/messages';
 import {
@@ -35,6 +35,9 @@ interface StartScreenProps {
   rendererMode: RendererMode;
   difficulty: DifficultyMode;
   selectedSkin: CrewmateSkinId;
+  bgmVolume: number;
+  sfxVolume: number;
+  reducedMotion: boolean;
   engineReady: boolean;
   step: MenuStep;
   isGuideOpen: boolean;
@@ -46,11 +49,47 @@ interface StartScreenProps {
   onSelectRenderer: (mode: RendererMode) => void;
   onSelectDifficulty: (difficulty: DifficultyMode) => void;
   onSelectSkin: (skin: CrewmateSkinId) => void;
+  onChangeBgmVolume: (volume: number) => void;
+  onChangeSfxVolume: (volume: number) => void;
+  onToggleReducedMotion: () => void;
   onStartRun: () => void;
 }
 
 const LANGS: Lang[] = ['en', 'ko'];
 const DIFFICULTY_MODES: DifficultyMode[] = ['casual', 'standard'];
+const PREVIEW_LOOP_DURATION_SEC = 14;
+const PREVIEW_FADE_IN_SEC = 0.45;
+const PREVIEW_FADE_OUT_SEC = 0.65;
+const PREVIEW_BASE_GAIN = 0.85;
+
+function computePreviewLoopBounds(
+  track: TrackMetadata,
+  mediaDurationSec: number
+): { startSec: number; lenSec: number } {
+  const safeDuration =
+    Number.isFinite(mediaDurationSec) && mediaDurationSec > 0
+      ? mediaDurationSec
+      : Math.max(MIN_TRACK_SECONDS, track.durationSec);
+  const rawStart =
+    typeof track.previewStartSec === 'number' && Number.isFinite(track.previewStartSec)
+      ? Math.max(0, track.previewStartSec)
+      : Math.max(0, safeDuration * 0.25);
+
+  if (safeDuration > PREVIEW_LOOP_DURATION_SEC + 1) {
+    const startSec = Math.min(
+      rawStart,
+      Math.max(0, safeDuration - PREVIEW_LOOP_DURATION_SEC - 0.1)
+    );
+    return { startSec, lenSec: PREVIEW_LOOP_DURATION_SEC };
+  }
+
+  const startSec = Math.min(rawStart, Math.max(0, safeDuration * 0.25));
+  const lenSec = Math.max(
+    1.2,
+    Math.min(PREVIEW_LOOP_DURATION_SEC, safeDuration - startSec - 0.08)
+  );
+  return { startSec, lenSec };
+}
 
 export const StartScreen: React.FC<StartScreenProps> = ({
   selectedTrack,
@@ -58,6 +97,9 @@ export const StartScreen: React.FC<StartScreenProps> = ({
   rendererMode,
   difficulty,
   selectedSkin,
+  bgmVolume,
+  sfxVolume,
+  reducedMotion,
   engineReady,
   step,
   isGuideOpen,
@@ -69,6 +111,9 @@ export const StartScreen: React.FC<StartScreenProps> = ({
   onSelectRenderer,
   onSelectDifficulty,
   onSelectSkin,
+  onChangeBgmVolume,
+  onChangeSfxVolume,
+  onToggleReducedMotion,
   onStartRun,
 }) => {
   const { lang, setLang, t, format } = useI18n();
@@ -78,24 +123,247 @@ export const StartScreen: React.FC<StartScreenProps> = ({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<string | null>(null);
+  const [isPreviewPlaying, setIsPreviewPlaying] = useState(false);
+
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null);
+  const previewObjectUrlRef = useRef<string | null>(null);
+  const previewRafRef = useRef<number>(0);
+  const previewTokenRef = useRef<number>(0);
+  const currentFadeRef = useRef<number>(0);
+  const bgmVolumeRef = useRef<number>(bgmVolume);
+  bgmVolumeRef.current = bgmVolume;
 
   const { activeTip, activeTipId, showTip, toggleTouchTip, hideTip } = useMenuTooltip();
 
+  const stopPreview = useCallback(() => {
+    previewTokenRef.current++;
+    if (previewRafRef.current !== 0) {
+      cancelAnimationFrame(previewRafRef.current);
+      previewRafRef.current = 0;
+    }
+    const audio = previewAudioRef.current;
+    if (audio) {
+      audio.onloadedmetadata = null;
+      audio.onended = null;
+      audio.onerror = null;
+      try {
+        audio.pause();
+        audio.removeAttribute('src');
+        audio.load();
+      } catch {
+        // Ignore media teardown errors in restricted/headless contexts
+      }
+    }
+    if (previewObjectUrlRef.current) {
+      URL.revokeObjectURL(previewObjectUrlRef.current);
+      previewObjectUrlRef.current = null;
+    }
+    currentFadeRef.current = 0;
+    setIsPreviewPlaying(false);
+  }, []);
+
+  const startPreview = useCallback(() => {
+    if (!selectedTrack.assetUrl && !selectedTrack.file) return;
+    stopPreview();
+
+    const token = ++previewTokenRef.current;
+    let audio = previewAudioRef.current;
+    if (!audio) {
+      audio = new Audio();
+      previewAudioRef.current = audio;
+    }
+    audio.preload = 'metadata';
+    audio.loop = false;
+    currentFadeRef.current = 0;
+    audio.volume = 0;
+
+    let srcUrl: string | undefined;
+    if (selectedTrack.isCustom && selectedTrack.file) {
+      const objUrl = URL.createObjectURL(selectedTrack.file);
+      previewObjectUrlRef.current = objUrl;
+      srcUrl = objUrl;
+    } else {
+      srcUrl = selectedTrack.assetUrl;
+    }
+    if (!srcUrl) return;
+
+    let bounds = computePreviewLoopBounds(selectedTrack, selectedTrack.durationSec);
+    let seekApplied = false;
+
+    const applyInitialSeek = () => {
+      if (previewTokenRef.current !== token || seekApplied) return;
+      bounds = computePreviewLoopBounds(selectedTrack, audio.duration);
+      try {
+        audio.currentTime = bounds.startSec;
+        seekApplied = true;
+      } catch {
+        // Will retry once media becomes seekable in RAF tick
+      }
+    };
+
+    const tickPreview = () => {
+      if (previewTokenRef.current !== token) {
+        previewRafRef.current = 0;
+        return;
+      }
+      if (!seekApplied && audio.readyState >= 1) {
+        applyInitialSeek();
+      }
+      if (seekApplied && !audio.paused) {
+        const pos = audio.currentTime - bounds.startSec;
+        if (pos >= bounds.lenSec || pos < -0.25) {
+          try {
+            audio.currentTime = bounds.startSec;
+          } catch {
+            // Ignore transient seek error
+          }
+          currentFadeRef.current = 0;
+          audio.volume = 0;
+        } else {
+          const clampedPos = Math.max(0, pos);
+          const fadeIn = Math.min(1, clampedPos / PREVIEW_FADE_IN_SEC);
+          const fadeOut = Math.min(
+            1,
+            Math.max(0, bounds.lenSec - clampedPos) / PREVIEW_FADE_OUT_SEC
+          );
+          const fadeFactor = Math.max(0, Math.min(1, Math.min(fadeIn, fadeOut)));
+          currentFadeRef.current = fadeFactor;
+          audio.volume = Math.max(
+            0,
+            Math.min(1, PREVIEW_BASE_GAIN * bgmVolumeRef.current * fadeFactor)
+          );
+        }
+      }
+      previewRafRef.current = requestAnimationFrame(tickPreview);
+    };
+
+    audio.onloadedmetadata = () => {
+      if (previewTokenRef.current !== token) {
+        audio.pause();
+        return;
+      }
+      applyInitialSeek();
+    };
+
+    audio.onended = () => {
+      if (previewTokenRef.current !== token) {
+        audio.pause();
+        return;
+      }
+      try {
+        audio.currentTime = bounds.startSec;
+        currentFadeRef.current = 0;
+        audio.volume = 0;
+        void audio.play().catch(() => undefined);
+      } catch {
+        stopPreview();
+      }
+    };
+
+    audio.onerror = () => {
+      if (previewTokenRef.current === token) {
+        stopPreview();
+      }
+    };
+
+    audio.src = srcUrl;
+    if (audio.readyState >= 1) {
+      applyInitialSeek();
+    }
+    setIsPreviewPlaying(true);
+    previewRafRef.current = requestAnimationFrame(tickPreview);
+
+    void audio
+      .play()
+      .then(() => {
+        if (previewTokenRef.current !== token) {
+          audio.pause();
+          return;
+        }
+        if (audio.readyState >= 1) {
+          applyInitialSeek();
+        }
+      })
+      .catch(() => {
+        if (previewTokenRef.current === token) {
+          stopPreview();
+        }
+      });
+  }, [selectedTrack, stopPreview]);
+
+  const handleTogglePreview = useCallback(() => {
+    if (isPreviewPlaying) {
+      stopPreview();
+    } else {
+      startPreview();
+    }
+  }, [isPreviewPlaying, startPreview, stopPreview]);
+
+  // 0ms real-time BGM slider feedback while preview is playing
   useEffect(() => {
+    bgmVolumeRef.current = bgmVolume;
+    const audio = previewAudioRef.current;
+    if (audio && isPreviewPlaying && !audio.paused) {
+      audio.volume = Math.max(
+        0,
+        Math.min(1, PREVIEW_BASE_GAIN * bgmVolume * currentFadeRef.current)
+      );
+    }
+  }, [bgmVolume, isPreviewPlaying]);
+
+  // Stop trigger #2: Unmount cleanup
+  useEffect(() => {
+    return () => {
+      stopPreview();
+    };
+  }, [stopPreview]);
+
+  // Stop trigger #3: Selected track changed
+  useEffect(() => {
+    stopPreview();
+  }, [selectedTrack.id, stopPreview]);
+
+  // Stop trigger #5: Leaving Step 2 (`step !== 'track'`) + reset scroll
+  useEffect(() => {
+    if (step !== 'track') {
+      stopPreview();
+    }
     if (stepBodyRef.current) {
       stepBodyRef.current.scrollTop = 0;
     }
-  }, [step]);
+  }, [step, stopPreview]);
 
   useEffect(() => {
     hideTip();
   }, [step, lang, hideTip]);
 
+  // Stop trigger #6: Beginner guide modal opened
   useEffect(() => {
     if (isGuideOpen) {
+      stopPreview();
       hideTip();
     }
-  }, [isGuideOpen, hideTip]);
+  }, [isGuideOpen, stopPreview, hideTip]);
+
+  // Stop trigger #7: Tab hidden / window blur / pagehide
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.hidden || document.visibilityState === 'hidden') {
+        stopPreview();
+      }
+    };
+    const onWindowBlur = () => {
+      stopPreview();
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('blur', onWindowBlur);
+    window.addEventListener('pagehide', onWindowBlur);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('blur', onWindowBlur);
+      window.removeEventListener('pagehide', onWindowBlur);
+    };
+  }, [stopPreview]);
 
   // Formats this browser can decode. Drives the hint, the picker filter, and validation.
   const supportedFormats = useMemo(() => detectSupportedAudioFormats(), []);
@@ -124,7 +392,9 @@ export const StartScreen: React.FC<StartScreenProps> = ({
     },
   });
 
+  // Stop trigger #4: Dropzone / file picker entry
   const handleFiles = async (files: FileList | null) => {
+    stopPreview();
     if (!files || files.length === 0) return;
     if (step !== 'track') {
       onStepChange('track');
@@ -150,6 +420,24 @@ export const StartScreen: React.FC<StartScreenProps> = ({
   const allTracks = [...BUILT_IN_TRACKS, ...customTracks];
   const equippedSkinCfg = CREWMATE_SKIN_CONFIG[selectedSkin];
   const currentTrackTitle = trackTitle(t, selectedTrack);
+  const bgmPct = Math.round(bgmVolume * 100);
+  const sfxPct = Math.round(sfxVolume * 100);
+
+  const previewTip: MenuTooltipData = {
+    id: 'track-preview',
+    title: t.menu.previewTipTitle,
+    body: t.menu.previewTipBody,
+    meta: `${currentTrackTitle} · ${Math.round(selectedTrack.bpm)} BPM · ${formatDurationMmSs(selectedTrack.durationSec)}`,
+    accentHex: isPreviewPlaying ? '#FFE600' : '#05D5FF',
+  };
+
+  const reducedMotionTip: MenuTooltipData = {
+    id: 'reduced-motion',
+    title: t.menu.reducedMotionTipTitle,
+    body: t.menu.reducedMotionTipBody,
+    meta: reducedMotion ? t.menu.reducedMotionOn : t.menu.reducedMotionOff,
+    accentHex: reducedMotion ? '#34D399' : '#05D5FF',
+  };
 
   const introTip: MenuTooltipData = {
     id: 'intro-info',
@@ -329,7 +617,10 @@ export const StartScreen: React.FC<StartScreenProps> = ({
             type="button"
             className="hero-guide-btn"
             data-testid="menu-guide-btn"
-            onClick={onOpenGuide}
+            onClick={() => {
+              stopPreview();
+              onOpenGuide();
+            }}
           >
             ? {t.menu.guideBtn}
           </button>
@@ -376,7 +667,10 @@ export const StartScreen: React.FC<StartScreenProps> = ({
               aria-current={step === 'setup' ? 'step' : undefined}
               className={`menu-step-tab${step === 'setup' ? ' active' : ' completed'}`}
               {...bindHoverTip(stepSetupTip)}
-              onClick={() => onStepChange('setup')}
+              onClick={() => {
+                stopPreview();
+                onStepChange('setup');
+              }}
             >
               <span className="menu-step-num" aria-hidden="true">
                 {step === 'track' ? '✓' : '01'}
@@ -539,22 +833,40 @@ export const StartScreen: React.FC<StartScreenProps> = ({
                   <section className="menu-section menu-track-section">
                     <div className="track-section-header">
                       <h2>{t.menu.trackSection}</h2>
-                      <span className="track-count-pill">
-                        {format(t.menu.trackCountSummary, { count: allTracks.length })}
-                      </span>
+                      <div className="track-header-actions">
+                        <button
+                          type="button"
+                          className={`menu-preview-btn${isPreviewPlaying ? ' is-playing' : ''}`}
+                          data-testid="menu-preview-toggle-btn"
+                          aria-pressed={isPreviewPlaying}
+                          {...bindHoverTip(previewTip)}
+                          onClick={handleTogglePreview}
+                        >
+                          {isPreviewPlaying ? t.menu.previewStopBtn : t.menu.previewPlayBtn}
+                        </button>
+                        <span className="track-count-pill">
+                          {format(t.menu.trackCountSummary, { count: allTracks.length })}
+                        </span>
+                      </div>
                     </div>
 
                     <div className="track-list" data-testid="menu-track-list">
                       {allTracks.map((track) => {
                         const isSelected = selectedTrack.id === track.id;
                         const title = trackTitle(t, track);
+                        const artist = trackArtist(t, track);
+                        const roundedBpm = Math.round(track.bpm);
+                        const durationText = formatDurationMmSs(track.durationSec);
                         const rec = getTrackRecord(track, difficulty);
                         const trackTip: MenuTooltipData = {
                           id: `track-${track.id}`,
                           title,
-                          body: `${trackArtist(t, track)} · ${format(
+                          body: `${artist} · ${format(
                             track.isCustom ? t.menu.trackTipCustom : t.menu.trackTipBuiltIn,
-                            { seconds: track.durationSec }
+                            {
+                              bpm: roundedBpm,
+                              duration: durationText,
+                            }
                           )}`,
                           meta: rec
                             ? `${t.difficulties[difficulty].shortName} · ${format(
@@ -578,7 +890,12 @@ export const StartScreen: React.FC<StartScreenProps> = ({
                             data-testid={`track-item-${track.id}`}
                             className={`track-item${isSelected ? ' selected' : ''}`}
                             {...bindHoverTip(trackTip)}
-                            onClick={() => onSelectTrack(track)}
+                            onClick={() => {
+                              if (track.id !== selectedTrack.id) {
+                                stopPreview();
+                              }
+                              onSelectTrack(track);
+                            }}
                           >
                             <span className="track-icon">
                               <HudVectorIcon
@@ -590,8 +907,9 @@ export const StartScreen: React.FC<StartScreenProps> = ({
                               <strong>{title}</strong>
                               <span>
                                 {format(t.menu.trackMeta, {
-                                  artist: trackArtist(t, track),
-                                  seconds: track.durationSec,
+                                  artist,
+                                  bpm: roundedBpm,
+                                  duration: durationText,
                                 })}
                               </span>
                             </div>
@@ -742,12 +1060,79 @@ export const StartScreen: React.FC<StartScreenProps> = ({
                         className="loadout-edit-btn"
                         data-testid="menu-edit-setup-btn"
                         {...bindHoverTip(editSetupTip)}
-                        onClick={() => onStepChange('setup')}
+                        onClick={() => {
+                          stopPreview();
+                          onStepChange('setup');
+                        }}
                       >
                         <HudVectorIcon kind="gear" size={13} />
                         <span>{t.menu.editSetupBtn}</span>
                       </button>
                     </div>
+                  </div>
+
+                  {/* Single-Row BGM / SFX Volume & Reduced-Motion Bar */}
+                  <div className="menu-audio-motion-bar" data-testid="menu-audio-motion-bar">
+                    <label className="audio-mini-slider">
+                      <span className="audio-mini-label">{t.menu.bgmLabel}</span>
+                      <input
+                        type="range"
+                        className="audio-mini-range"
+                        data-testid="menu-bgm-slider"
+                        min={0}
+                        max={100}
+                        step={1}
+                        value={bgmPct}
+                        aria-label={t.menu.bgmAria}
+                        onChange={(e) => onChangeBgmVolume(Number(e.target.value) / 100)}
+                      />
+                      <span className="audio-mini-val">{bgmPct}%</span>
+                    </label>
+                    <label className="audio-mini-slider">
+                      <span className="audio-mini-label">{t.menu.sfxLabel}</span>
+                      <input
+                        type="range"
+                        className="audio-mini-range"
+                        data-testid="menu-sfx-slider"
+                        min={0}
+                        max={100}
+                        step={1}
+                        value={sfxPct}
+                        aria-label={t.menu.sfxAria}
+                        onChange={(e) => onChangeSfxVolume(Number(e.target.value) / 100)}
+                      />
+                      <span className="audio-mini-val">{sfxPct}%</span>
+                    </label>
+                    <button
+                      type="button"
+                      className={`motion-toggle-chip${reducedMotion ? ' active' : ''}`}
+                      data-testid="menu-reduced-motion-btn"
+                      aria-pressed={reducedMotion}
+                      {...bindHoverTip(reducedMotionTip)}
+                      onClick={(e) => {
+                        const nextReduced = !reducedMotion;
+                        onToggleReducedMotion();
+                        if (activeTip?.id === reducedMotionTip.id) {
+                          showTip(e.currentTarget, {
+                            ...reducedMotionTip,
+                            meta: nextReduced
+                              ? t.menu.reducedMotionOn
+                              : t.menu.reducedMotionOff,
+                            accentHex: nextReduced ? '#34D399' : '#05D5FF',
+                          });
+                        } else if (isCoarsePointer) {
+                          toggleTouchTip(e, {
+                            ...reducedMotionTip,
+                            meta: nextReduced
+                              ? t.menu.reducedMotionOn
+                              : t.menu.reducedMotionOff,
+                            accentHex: nextReduced ? '#34D399' : '#05D5FF',
+                          });
+                        }
+                      }}
+                    >
+                      {reducedMotion ? t.menu.reducedMotionOn : t.menu.reducedMotionOff}
+                    </button>
                   </div>
 
                   {/* 2-Lane Core Controls Guide */}
@@ -759,7 +1144,10 @@ export const StartScreen: React.FC<StartScreenProps> = ({
                           type="button"
                           className="menu-info-badge"
                           data-testid="menu-controls-guide-btn"
-                          onClick={onOpenGuide}
+                          onClick={() => {
+                            stopPreview();
+                            onOpenGuide();
+                          }}
                         >
                           ? {t.menu.guideBtn}
                         </button>
@@ -824,7 +1212,10 @@ export const StartScreen: React.FC<StartScreenProps> = ({
                 type="button"
                 className="menu-prev-btn"
                 data-testid="menu-prev-step-btn"
-                onClick={() => onStepChange('setup')}
+                onClick={() => {
+                  stopPreview();
+                  onStepChange('setup');
+                }}
               >
                 {t.menu.prevToSetupBtn}
               </button>
@@ -833,7 +1224,10 @@ export const StartScreen: React.FC<StartScreenProps> = ({
                 className="start-run-btn"
                 data-testid="start-run-btn"
                 disabled={!engineReady}
-                onClick={onStartRun}
+                onClick={() => {
+                  stopPreview();
+                  onStartRun();
+                }}
               >
                 {engineReady ? t.menu.start : t.menu.initializing}
               </button>

@@ -1,9 +1,13 @@
 import type { FrequencyBands, SfxMode, TrackMetadata } from '../types/game';
 import {
   loadAudioOffsetMs,
+  loadBgmVolume,
   loadSfxMode,
+  loadSfxVolume,
   saveAudioOffsetMs,
+  saveBgmVolume,
   saveSfxMode,
+  saveSfxVolume,
 } from '../engine/recordsStore';
 import {
   AudioLoadError,
@@ -42,11 +46,14 @@ export class AudioEngine {
   private startTimestamp: number = 0;
   private pauseOffset: number = 0;
   private audioOffsetMs: number = 0;
+  private bgmVolume: number = 1.0;
   private lastBeatTime: number = 0;
   private rollingLowAvg: number = 0.25;
 
   constructor() {
     this.sfx.setMode(loadSfxMode());
+    this.bgmVolume = loadBgmVolume();
+    this.sfx.setVolume(loadSfxVolume());
     this.audioOffsetMs = loadAudioOffsetMs();
   }
 
@@ -59,6 +66,26 @@ export class AudioEngine {
     return this.sfx.getMode();
   }
 
+  public setBgmVolume(volume: number): number {
+    this.bgmVolume = saveBgmVolume(volume);
+    this.restoreSongGain();
+    return this.bgmVolume;
+  }
+
+  public getBgmVolume(): number {
+    return this.bgmVolume;
+  }
+
+  public setSfxVolume(volume: number): number {
+    const saved = saveSfxVolume(volume);
+    this.sfx.setVolume(saved);
+    return saved;
+  }
+
+  public getSfxVolume(): number {
+    return this.sfx.getVolume();
+  }
+
   public setAudioOffsetMs(offsetMs: number): number {
     this.audioOffsetMs = saveAudioOffsetMs(offsetMs);
     return this.audioOffsetMs;
@@ -66,6 +93,15 @@ export class AudioEngine {
 
   public getAudioOffsetMs(): number {
     return this.audioOffsetMs;
+  }
+
+  private getTargetSongGain(): number {
+    return BASE_SONG_GAIN * this.bgmVolume;
+  }
+
+  private isContextResumable(ctx: AudioContext): boolean {
+    const state = ctx.state as string;
+    return state !== 'running' && state !== 'closed';
   }
 
   private ensureContext(): AudioContext {
@@ -85,7 +121,7 @@ export class AudioEngine {
       this.analyserNode.smoothingTimeConstant = 0.72;
 
       this.gainNode = this.ctx.createGain();
-      this.gainNode.gain.value = BASE_SONG_GAIN;
+      this.gainNode.gain.value = this.getTargetSongGain();
 
       this.analyserNode.connect(this.gainNode);
       this.gainNode.connect(this.ctx.destination);
@@ -97,11 +133,15 @@ export class AudioEngine {
 
   private restoreSongGain(): void {
     if (!this.ctx || !this.gainNode) return;
+    const targetGain = this.getTargetSongGain();
+    this.gainNode.gain.value = targetGain;
     try {
-      const now = this.ctx.currentTime;
-      const g = this.gainNode.gain;
-      g.cancelScheduledValues(now);
-      g.setValueAtTime(BASE_SONG_GAIN, now);
+      if ((this.ctx.state as string) !== 'closed') {
+        const now = this.ctx.currentTime;
+        const g = this.gainNode.gain;
+        g.cancelScheduledValues(now);
+        g.setValueAtTime(targetGain, now);
+      }
     } catch {
       // Ignore if context is closing
     }
@@ -109,17 +149,26 @@ export class AudioEngine {
 
   /**
    * [Fix 3] Micro sidechain ducking (`-2.1dB`, `55ms` recovery) for heavy `CHORD` & `RUSH` finishers.
-   * Uses strictly positive gain anchors (`>= 0.001`) so `exponentialRampToValueAtTime` never throws.
+   * Uses strictly positive gain anchors (`>= 0.0001`) and zero-volume guard (`targetGain <= 0.001`)
+   * so `exponentialRampToValueAtTime` never throws `RangeError` when `bgmVolume === 0`.
    */
   public triggerSidechainDuck(duckGain: number = 0.78, recoverySec: number = 0.055): void {
     if (!this.ctx || !this.gainNode || !this.isPlaying || this.ctx.state !== 'running') return;
+    const targetGain = this.getTargetSongGain();
     const now = this.ctx.currentTime;
     const g = this.gainNode.gain;
     g.cancelScheduledValues(now);
-    g.setValueAtTime(Math.max(0.001, g.value), now);
-    g.linearRampToValueAtTime(Math.max(0.05, BASE_SONG_GAIN * duckGain), now + 0.004);
+    if (targetGain <= 0.001) {
+      g.setValueAtTime(0, now);
+      return;
+    }
+    const safeStart = Math.max(0.0001, g.value);
+    const safeDucked = Math.max(0.0001, targetGain * duckGain);
+    const safeTarget = Math.max(0.0001, targetGain);
+    g.setValueAtTime(safeStart, now);
+    g.linearRampToValueAtTime(safeDucked, now + 0.004);
     g.exponentialRampToValueAtTime(
-      BASE_SONG_GAIN,
+      safeTarget,
       now + 0.004 + Math.max(0.02, recoverySec)
     );
   }
@@ -131,7 +180,7 @@ export class AudioEngine {
   public unlockFromGesture(): void {
     try {
       const ctx = this.ensureContext();
-      if (ctx.state === 'suspended') {
+      if (this.isContextResumable(ctx)) {
         void ctx.resume().catch(() => undefined);
       }
     } catch {
@@ -218,8 +267,12 @@ export class AudioEngine {
 
   public async startPlayback(): Promise<void> {
     const ctx = this.ensureContext();
-    if (ctx.state === 'suspended') {
-      await ctx.resume();
+    if (this.isContextResumable(ctx)) {
+      try {
+        await ctx.resume();
+      } catch {
+        // Continue safely if browser rejects resume outside direct gesture
+      }
     }
 
     if (!this.currentBuffer) {
@@ -261,8 +314,12 @@ export class AudioEngine {
   public async resume(): Promise<void> {
     if (this.isPlaying) return;
     const ctx = this.ensureContext();
-    if (ctx.state === 'suspended') {
-      await ctx.resume();
+    if (this.isContextResumable(ctx)) {
+      try {
+        await ctx.resume();
+      } catch {
+        // Continue safely if browser rejects resume outside direct gesture
+      }
     }
 
     if (!this.currentBuffer) {

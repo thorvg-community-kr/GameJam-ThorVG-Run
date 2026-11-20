@@ -18,13 +18,14 @@ export class SfxSynth {
   private busGain: GainNode | null = null;
   private noiseBuffer: AudioBuffer | null = null;
   private mode: SfxMode = 'full';
+  private volume: number = 1.0;
   private readonly recentHitTimes: number[] = [];
 
   public attachContext(ctx: AudioContext): void {
     if (this.ctx === ctx && this.busGain) return;
     this.ctx = ctx;
     this.busGain = ctx.createGain();
-    this.busGain.gain.value = 0.82;
+    this.busGain.gain.value = 0.82 * this.volume;
     this.busGain.connect(ctx.destination);
 
     // Pre-generate 0.16s ultra-crisp white-noise burst buffer once at startup
@@ -43,6 +44,28 @@ export class SfxSynth {
 
   public getMode(): SfxMode {
     return this.mode;
+  }
+
+  public setVolume(volume: number): void {
+    const clamped = Number.isFinite(volume) ? Math.max(0, Math.min(1, volume)) : 1.0;
+    this.volume = clamped;
+    if (this.busGain) {
+      const target = 0.82 * this.volume;
+      this.busGain.gain.value = target;
+      if (this.ctx && (this.ctx.state as string) !== 'closed') {
+        try {
+          const now = this.ctx.currentTime;
+          this.busGain.gain.cancelScheduledValues(now);
+          this.busGain.gain.setValueAtTime(target, now);
+        } catch {
+          // Ignore if context is closing
+        }
+      }
+    }
+  }
+
+  public getVolume(): number {
+    return this.volume;
   }
 
   /**
@@ -69,7 +92,15 @@ export class SfxSynth {
     delaySec: number = 0,
     attackSec: number = 0.0004
   ): void {
-    if (!this.ctx || !this.busGain || this.ctx.state !== 'running' || gainPeak <= 0.0002) return;
+    if (
+      this.volume <= 0.0001 ||
+      !this.ctx ||
+      !this.busGain ||
+      this.ctx.state !== 'running' ||
+      gainPeak <= 0.0002
+    ) {
+      return;
+    }
     const t0 = this.ctx.currentTime + delaySec;
     const tAtk = t0 + Math.max(0.0003, attackSec);
     const t1 = t0 + Math.max(0.008, durationSec);
@@ -101,6 +132,7 @@ export class SfxSynth {
     delaySec: number = 0
   ): void {
     if (
+      this.volume <= 0.0001 ||
       !this.ctx ||
       !this.busGain ||
       !this.noiseBuffer ||
@@ -263,9 +295,30 @@ export class SfxSynth {
   }
 
   public playStageFail(): void {
-    if (this.mode === 'off' || !this.ctx || this.ctx.state !== 'running') return;
+    if (this.mode === 'off' || this.volume <= 0.0001 || !this.ctx || this.ctx.state !== 'running') {
+      return;
+    }
     this.schedulePercussiveTone(320, 44, 0.4, 0.17, 'sawtooth', 0, 0.002);
     this.schedulePercussiveTone(210, 34, 0.44, 0.14, 'triangle', 0.025, 0.002);
     this.scheduleNoiseTransient(420, 'lowpass', 1.1, 0.22, 0.14);
+  }
+
+  public playCountdownTick(step: 3 | 2 | 1): void {
+    if (
+      this.mode === 'off' ||
+      this.volume <= 0.0001 ||
+      !this.ctx ||
+      this.ctx.state !== 'running'
+    ) {
+      return;
+    }
+    const baseHz = step === 3 ? 880 : step === 2 ? 1046.5 : 1318.5;
+    const endHz = baseHz * 0.5;
+    const accent = step === 1 ? 1.15 : 0.95;
+    this.scheduleNoiseTransient(4600, 'highpass', 1.6, 0.018, 0.09 * accent);
+    this.schedulePercussiveTone(baseHz, endHz, 0.065, 0.14 * accent, 'triangle');
+    if (step === 1) {
+      this.schedulePercussiveTone(baseHz * 1.5, baseHz, 0.075, 0.075, 'sine', 0.004);
+    }
   }
 }

@@ -139,6 +139,7 @@ export interface TrackMetadata {
   artist: string;
   bpm: number;
   durationSec: number;
+  previewStartSec?: number;
   isCustom?: boolean;
   file?: File;
   assetUrl?: string;
@@ -416,6 +417,7 @@ export interface HUDTelemetry {
   chordKeyFlash?: boolean;
   rushCombo?: number;
   audioOffsetMs?: number;
+  resumeCountdown?: 3 | 2 | 1 | null;
 }
 
 /**

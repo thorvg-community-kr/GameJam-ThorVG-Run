@@ -11,6 +11,9 @@ import {
 
 const RECORDS_STORAGE_KEY = 'thorvg_run:records:v2';
 const SFX_MODE_STORAGE_KEY = 'thorvg_run:sfx_mode:v1';
+const BGM_VOLUME_STORAGE_KEY = 'thorvg_run:bgm_volume:v1';
+const SFX_VOLUME_STORAGE_KEY = 'thorvg_run:sfx_volume:v1';
+const REDUCED_MOTION_STORAGE_KEY = 'thorvg_run:reduced_motion:v1';
 const SELECTED_SKIN_KEY = 'thorvg_run:selected_skin:v1';
 const AUDIO_OFFSET_MS_KEY = 'thorvg_run:audio_offset_ms:v1';
 const GUIDE_DISMISSED_KEY = 'thorvg_run:guide_dismissed:v1';
@@ -65,7 +68,14 @@ export function saveTrackRunResult(
   difficulty: DifficultyMode,
   hud: Pick<
     HUDTelemetry,
-    'score' | 'rank' | 'accuracy' | 'maxCombo' | 'starsCollected' | 'judgmentCounts'
+    | 'score'
+    | 'rank'
+    | 'accuracy'
+    | 'maxCombo'
+    | 'starsCollected'
+    | 'judgmentCounts'
+    | 'orbsCollected'
+    | 'totalOrbs'
   >
 ): { record: TrackRecord; isNewRecord: boolean; scoreDelta: number } {
   const all = readAllRecords();
@@ -77,7 +87,17 @@ export function saveTrackRunResult(
   const runAcc = hud.accuracy ?? 0;
   const runCombo = hud.maxCombo ?? 0;
   const runStars = hud.starsCollected ?? 0;
-  const runNoMiss = (hud.judgmentCounts?.miss ?? 0) === 0;
+
+  const counts = hud.judgmentCounts;
+  const judgedHits =
+    (counts?.perfect ?? 0) + (counts?.great ?? 0) + (counts?.good ?? 0);
+  const expectedTargets = hud.totalOrbs ?? 0;
+  const allTargetsCleared =
+    expectedTargets > 0
+      ? (hud.orbsCollected ?? judgedHits) >= expectedTargets &&
+        judgedHits >= expectedTargets
+      : judgedHits > 0;
+  const runNoMiss = (counts?.miss ?? 0) === 0 && allTargetsCleared;
 
   const isNewRecord = !prev || runScore > prev.bestScore;
   const scoreDelta = prev ? runScore - prev.bestScore : runScore;
@@ -221,4 +241,97 @@ export function saveSelectedTrackId(trackId: string): void {
   } catch {
     // Ignore storage errors
   }
+}
+
+function clampUnitVolume(volume: number): number {
+  if (!Number.isFinite(volume)) return 1.0;
+  const clamped = Math.max(0, Math.min(1, volume));
+  return Math.round(clamped * 100) / 100;
+}
+
+export function loadBgmVolume(): number {
+  try {
+    const raw = window.localStorage.getItem(BGM_VOLUME_STORAGE_KEY);
+    if (raw !== null && raw.trim() !== '') {
+      const parsed = Number(raw);
+      if (Number.isFinite(parsed)) {
+        return clampUnitVolume(parsed);
+      }
+    }
+  } catch {
+    // Ignore storage errors
+  }
+  return 1.0;
+}
+
+export function saveBgmVolume(volume: number): number {
+  const clamped = clampUnitVolume(volume);
+  try {
+    window.localStorage.setItem(BGM_VOLUME_STORAGE_KEY, String(clamped));
+  } catch {
+    // Ignore storage errors
+  }
+  return clamped;
+}
+
+export function loadSfxVolume(): number {
+  try {
+    const raw = window.localStorage.getItem(SFX_VOLUME_STORAGE_KEY);
+    if (raw !== null && raw.trim() !== '') {
+      const parsed = Number(raw);
+      if (Number.isFinite(parsed)) {
+        return clampUnitVolume(parsed);
+      }
+    }
+  } catch {
+    // Ignore storage errors
+  }
+  return 1.0;
+}
+
+export function saveSfxVolume(volume: number): number {
+  const clamped = clampUnitVolume(volume);
+  try {
+    window.localStorage.setItem(SFX_VOLUME_STORAGE_KEY, String(clamped));
+  } catch {
+    // Ignore storage errors
+  }
+  return clamped;
+}
+
+export function hasExplicitReducedMotionPref(): boolean {
+  try {
+    const raw = window.localStorage.getItem(REDUCED_MOTION_STORAGE_KEY);
+    return raw === '1' || raw === '0';
+  } catch {
+    return false;
+  }
+}
+
+export function loadReducedMotion(): boolean {
+  try {
+    const raw = window.localStorage.getItem(REDUCED_MOTION_STORAGE_KEY);
+    if (raw === '1') return true;
+    if (raw === '0') return false;
+  } catch {
+    // Ignore storage errors
+  }
+  try {
+    if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+      return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    }
+  } catch {
+    // Ignore matchMedia errors
+  }
+  return false;
+}
+
+export function saveReducedMotion(enabled: boolean): boolean {
+  const next = Boolean(enabled);
+  try {
+    window.localStorage.setItem(REDUCED_MOTION_STORAGE_KEY, next ? '1' : '0');
+  } catch {
+    // Ignore storage errors
+  }
+  return next;
 }

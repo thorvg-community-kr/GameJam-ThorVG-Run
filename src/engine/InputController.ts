@@ -14,6 +14,7 @@ export interface GameInputCommands {
   onTogglePause: () => void;
   onExitToMenu: () => void;
   onReplayRun: () => void;
+  onQuickRetry?: () => void;
   onWheelZoom: (factor: number, canvasX: number, canvasY: number) => void;
   onStepZoom: (factor: number) => void;
   onResetZoom: () => void;
@@ -158,13 +159,17 @@ export class InputController {
       }
 
       if (this.commands.isRunFinished()) {
-        if (
-          (e.code === 'Space' || e.code === 'Enter' || e.code === 'KeyR') &&
-          !e.repeat &&
-          noMod
-        ) {
-          if (!(document.activeElement instanceof HTMLButtonElement)) {
+        if (!e.repeat && noMod) {
+          if (e.code === 'KeyR') {
             e.preventDefault();
+            clearAllPointerState();
+            this.commands.onReplayRun();
+          } else if (
+            (e.code === 'Space' || e.code === 'Enter') &&
+            !(document.activeElement instanceof HTMLButtonElement)
+          ) {
+            e.preventDefault();
+            clearAllPointerState();
             this.commands.onReplayRun();
           }
         }
@@ -193,8 +198,13 @@ export class InputController {
 
       if (this.commands.isPaused()) {
         if (!e.repeat && noMod) {
-          if (e.code === 'KeyQ') {
+          if (e.code === 'KeyR') {
             e.preventDefault();
+            clearAllPointerState();
+            (this.commands.onQuickRetry ?? this.commands.onReplayRun)();
+          } else if (e.code === 'KeyQ') {
+            e.preventDefault();
+            clearAllPointerState();
             this.commands.onExitToMenu();
           } else if (e.code === 'KeyM') {
             this.commands.onCycleSfxMode();

@@ -23,7 +23,7 @@ import {
 } from '../types/game';
 import { BezierTerrain } from './BezierTerrain';
 import { PlayerController } from './PlayerController';
-import { nextSfxMode, saveTrackRunResult } from './recordsStore';
+import { loadReducedMotion, nextSfxMode, saveTrackRunResult } from './recordsStore';
 import { ScoreJudgeSystem } from './systems/ScoreJudgeSystem';
 import { VfxPoolSystem } from './systems/VfxPoolSystem';
 
@@ -31,6 +31,7 @@ export const RETICLE_X_RATIO = 0.25;
 export const PLAYER_HIT_X_RATIO = RETICLE_X_RATIO;
 
 const OVERDRIVE_DURATION_SEC = 8.0;
+const RESUME_COUNTDOWN_TOTAL_SEC = 1.35; // 0.45s * 3 steps (3 -> 2 -> 1)
 const HUD_PUBLISH_INTERVAL_SEC = 0.05; // 20Hz steady telemetry + 0ms instant flush on discrete dirty events
 const KEY_FLASH_DURATION_SEC = 0.09;
 const LIVE_MIN_ZOOM = 0.35;
@@ -68,6 +69,10 @@ export class GameEngine {
   private currentTrackMeta: TrackMetadata | null = null;
   private finishRecorded: boolean = false;
   private finishedAudioSec: number = 0;
+  private postAudioTailSec: number = 0;
+  private lastTargetJudgeEndSec: number = 0;
+  private playbackSettled: boolean = false;
+  private runInstanceId: number = 0;
   private lastIsNewRecord: boolean = false;
   private lastScoreDelta: number = 0;
 
@@ -155,9 +160,13 @@ export class GameEngine {
   private panY: number = 0;
   private hasManualPan: boolean = false;
   private pausedRenderRaf: number = 0;
+  private resumeCountdownSec: number = 0;
+  private countdownRafId: number = 0;
+  private lastCountdownStep: 3 | 2 | 1 | null = null;
 
   // Dynamic Vector Cinematic Camera & Non-Freezing Hitstop State (`[Fix 2]`)
   private cinematicCamera: boolean = true;
+  private reducedMotion: boolean = false;
   private cinematicZoom: number = 1.0;
   private impactZoomPunch: number = 0;
   private hitstopTimer: number = 0;
@@ -172,6 +181,7 @@ export class GameEngine {
     this.scoreJudge = new ScoreJudgeSystem();
     this.vfx = new VfxPoolSystem();
     this.onHudUpdate = onHudUpdate;
+    this.reducedMotion = loadReducedMotion();
   }
 
   public attachRenderer(
@@ -196,7 +206,11 @@ export class GameEngine {
       }
       this.cameraX = this.pausedAudioSec * this.baseSpeed - this.getReticleScreenX();
       this.prevRenderCameraX = this.cameraX;
-      if (!this.hasManualPan) {
+      if (this.resumeCountdownSec > 0) {
+        this.panX = 0;
+        this.panY = 0;
+        this.hasManualPan = false;
+      } else if (!this.hasManualPan) {
         this.applyNeutralPausedFraming(this.userZoom);
       } else {
         this.clampPausedPan();
@@ -283,14 +297,54 @@ export class GameEngine {
     return next;
   }
 
+  public setBgmVolume(volume: number): number {
+    return this.audio.setBgmVolume(volume);
+  }
+
+  public getBgmVolume(): number {
+    return this.audio.getBgmVolume();
+  }
+
+  public setSfxVolume(volume: number): number {
+    return this.audio.setSfxVolume(volume);
+  }
+
+  public getSfxVolume(): number {
+    return this.audio.getSfxVolume();
+  }
+
+  public setReducedMotion(enabled: boolean): void {
+    const next = Boolean(enabled);
+    if (this.reducedMotion === next) return;
+    this.reducedMotion = next;
+    if (next) {
+      this.shakeTimer = 0;
+      this.shakeIntensity = 0;
+      this.impactZoomPunch = 0;
+    }
+    if (this.running && this.paused) {
+      this.refreshPausedView(false);
+    }
+  }
+
+  public getReducedMotion(): boolean {
+    return this.reducedMotion;
+  }
+
+  private getRunEffectiveAudioSec(): number {
+    return this.audio.getEffectiveElapsedSec() + this.postAudioTailSec;
+  }
+
   public setAudioOffsetMs(offsetMs: number): number {
     const applied = this.audio.setAudioOffsetMs(offsetMs);
     this.hudDirty = true;
     if (this.running && this.paused) {
-      this.pausedAudioSec = this.audio.getEffectiveElapsedSec();
+      this.pausedAudioSec = this.getRunEffectiveAudioSec();
       this.cameraX = this.pausedAudioSec * this.baseSpeed - this.getReticleScreenX();
       this.prevRenderCameraX = this.cameraX;
-      this.clampPausedPan();
+      if (this.resumeCountdownSec <= 0) {
+        this.clampPausedPan();
+      }
       this.refreshPausedView(true);
     }
     return applied;
@@ -305,7 +359,11 @@ export class GameEngine {
     this.hudDirty = true;
     if (this.running && this.paused) {
       this.cinematicZoom = enabled ? this.computeTargetCinematicZoom(this.pausedAudioSec) : 1.0;
-      if (!this.hasManualPan) {
+      if (this.resumeCountdownSec > 0) {
+        this.panX = 0;
+        this.panY = 0;
+        this.hasManualPan = false;
+      } else if (!this.hasManualPan) {
         this.applyNeutralPausedFraming(this.userZoom);
       } else {
         this.clampPausedPan();
@@ -365,7 +423,11 @@ export class GameEngine {
    * World `cameraX` NEVER freezes so incoming beat targets retain `0.0ms` timing integrity!
    */
   private triggerHitstop(durationSec: number, zoomPunch: number): void {
-    this.impactZoomPunch = Math.min(0.11, Math.max(this.impactZoomPunch, zoomPunch));
+    if (!this.reducedMotion) {
+      this.impactZoomPunch = Math.min(0.11, Math.max(this.impactZoomPunch, zoomPunch));
+    } else {
+      this.impactZoomPunch = 0;
+    }
     if (this.hitstopCooldownTimer > 0 || this.hitstopTimer > 0) return;
     this.hitstopTimer = durationSec;
     this.hitstopCooldownTimer = 0.12;
@@ -374,6 +436,7 @@ export class GameEngine {
   }
 
   private triggerScreenShake(durationSec: number, intensityPx: number): void {
+    if (this.reducedMotion) return;
     if (intensityPx >= this.shakeIntensity || this.shakeTimer <= 0.04) {
       this.shakeDuration = Math.max(0.05, durationSec);
       this.shakeTimer = this.shakeDuration;
@@ -409,7 +472,11 @@ export class GameEngine {
       }
       this.cameraX = this.pausedAudioSec * this.baseSpeed - this.getReticleScreenX();
       this.prevRenderCameraX = this.cameraX;
-      if (!this.hasManualPan) {
+      if (this.resumeCountdownSec > 0) {
+        this.panX = 0;
+        this.panY = 0;
+        this.hasManualPan = false;
+      } else if (!this.hasManualPan) {
         this.applyNeutralPausedFraming(this.userZoom);
       } else {
         this.clampPausedPan();
@@ -431,7 +498,7 @@ export class GameEngine {
       );
       this.renderCurrentState(this.finishedAudioSec, this.pausedFreq);
     } else if (this.running && !this.paused) {
-      const effectiveAudioSec = this.audio.getEffectiveElapsedSec();
+      const effectiveAudioSec = this.getRunEffectiveAudioSec();
       this.cameraX = effectiveAudioSec * this.baseSpeed - this.getReticleScreenX();
       this.prevRenderCameraX = this.cameraX;
       const freq = this.audio.getFrequencyData();
@@ -445,6 +512,19 @@ export class GameEngine {
       );
       this.renderCurrentState(effectiveAudioSec, freq);
     }
+  }
+
+  public hasPreparedBlueprint(
+    track: TrackMetadata,
+    difficulty: DifficultyMode = this.difficulty
+  ): boolean {
+    return Boolean(
+      this.activeBlueprint &&
+        this.activeBlueprint.trackId === track.id &&
+        this.activeBlueprint.difficulty === difficulty &&
+        this.currentTrackMeta?.id === track.id &&
+        this.audio.getBuffer()
+    );
   }
 
   public async prepareRun(
@@ -485,8 +565,9 @@ export class GameEngine {
     }
 
     this.resetState();
+    const instanceId = this.runInstanceId;
     this.renderer?.clearForTransition();
-    const initialAudioSec = this.audio.getEffectiveElapsedSec();
+    const initialAudioSec = this.getRunEffectiveAudioSec();
     this.renderCurrentState(initialAudioSec, this.audio.getFrequencyData());
     this.hudDirty = false;
     this.scoreJudge.consumeDirty();
@@ -497,7 +578,60 @@ export class GameEngine {
     cancelAnimationFrame(this.rafId);
     this.rafId = requestAnimationFrame(this.loop);
 
-    await this.audio.startPlayback();
+    try {
+      await this.audio.startPlayback();
+    } finally {
+      if (this.runInstanceId === instanceId) {
+        this.playbackSettled = true;
+      }
+    }
+    if (this.runInstanceId !== instanceId) return;
+    if (!this.running) {
+      this.audio.stop();
+    } else if (this.paused) {
+      this.audio.pause();
+    }
+  }
+
+  public async restartCurrentRun(): Promise<void> {
+    if (!this.activeBlueprint || !this.currentTrackMeta || !this.audio.getBuffer()) {
+      if (this.currentTrackMeta) {
+        await this.startRun(this.currentTrackMeta, undefined, this.difficulty);
+      }
+      return;
+    }
+
+    this.running = false;
+    this.paused = false;
+    this.pauseSeq++;
+    this.cancelResumeCountdown();
+    cancelAnimationFrame(this.rafId);
+    cancelAnimationFrame(this.pausedRenderRaf);
+    this.pausedRenderRaf = 0;
+    this.audio.stop();
+
+    this.resetState();
+    const instanceId = this.runInstanceId;
+    this.renderer?.clearForTransition();
+    const initialAudioSec = this.getRunEffectiveAudioSec();
+    this.renderCurrentState(initialAudioSec, this.audio.getFrequencyData());
+    this.hudDirty = false;
+    this.scoreJudge.consumeDirty();
+    this.publishHud(0, 1.0, false);
+
+    this.running = true;
+    this.lastFrameTime = performance.now();
+    cancelAnimationFrame(this.rafId);
+    this.rafId = requestAnimationFrame(this.loop);
+
+    try {
+      await this.audio.startPlayback();
+    } finally {
+      if (this.runInstanceId === instanceId) {
+        this.playbackSettled = true;
+      }
+    }
+    if (this.runInstanceId !== instanceId) return;
     if (!this.running) {
       this.audio.stop();
     } else if (this.paused) {
@@ -509,8 +643,13 @@ export class GameEngine {
     this.running = false;
     this.paused = false;
     this.pauseSeq++;
+    this.runInstanceId++;
+    this.cancelResumeCountdown();
     this.finishRecorded = false;
     this.finishedAudioSec = 0;
+    this.postAudioTailSec = 0;
+    this.lastTargetJudgeEndSec = 0;
+    this.playbackSettled = false;
     this.userZoom = 1.0;
     this.savedLiveZoom = 1.0;
     this.panX = 0;
@@ -603,10 +742,11 @@ export class GameEngine {
         : this.currentSectionIntensity === 'drop'
           ? 0.042
           : 0.026;
-    const beatAdd = this.beatPulse * punchScale;
+    const beatAdd = this.reducedMotion ? 0 : this.beatPulse * punchScale;
+    const zoomPunch = this.reducedMotion ? 0 : this.impactZoomPunch;
     const rawPhaseZoom = Math.max(
       0.55,
-      Math.min(2.2, this.cinematicZoom * (1.0 + beatAdd + this.impactZoomPunch))
+      Math.min(2.2, this.cinematicZoom * (1.0 + beatAdd + zoomPunch))
     );
     const viewportScale = this.getResponsiveViewportZoom();
     if (viewportScale >= 1.0) {
@@ -631,7 +771,7 @@ export class GameEngine {
   }
 
   private getEffectiveFocalPoint(): { fx: number; fy: number } {
-    if (this.paused) {
+    if (this.paused && this.resumeCountdownSec <= 0) {
       return { fx: this.width * 0.5, fy: this.height * 0.5 };
     }
     return this.getLiveFocalPoint();
@@ -707,15 +847,63 @@ export class GameEngine {
     return this.paused;
   }
 
+  public get isResumeCountingDown(): boolean {
+    return this.paused && this.resumeCountdownSec > 0;
+  }
+
+  private cancelResumeCountdown(): void {
+    if (this.countdownRafId !== 0) {
+      cancelAnimationFrame(this.countdownRafId);
+      this.countdownRafId = 0;
+    }
+    this.resumeCountdownSec = 0;
+    this.lastCountdownStep = null;
+  }
+
+  private computeCountdownStep(remainingSec: number): 3 | 2 | 1 | null {
+    if (remainingSec <= 0) return null;
+    if (remainingSec > 0.9) return 3;
+    if (remainingSec > 0.45) return 2;
+    return 1;
+  }
+
   public pauseRun(): void {
-    if (!this.running || this.paused || this.finishRecorded) return;
+    if (
+      !this.running ||
+      (this.paused && this.resumeCountdownSec <= 0) ||
+      this.finishRecorded
+    ) {
+      return;
+    }
+
+    if (this.paused && this.resumeCountdownSec > 0) {
+      // Cancel active 3-2-1 resume countdown without clobbering pausedFreq or re-pausing audio
+      this.pauseSeq++;
+      this.cancelResumeCountdown();
+      this.userZoom = this.savedLiveZoom;
+      this.hasManualPan = false;
+      const { fx: fx0, fy: fy0 } = this.getLiveFocalPoint();
+      const cx = this.width * 0.5;
+      const cy = this.height * 0.5;
+      const zEff = Math.max(0.05, this.getEffectiveZoomScale());
+      this.panX = (fx0 - cx) * (1 - 1 / zEff);
+      this.panY = (fy0 - cy) * (1 - 1 / zEff);
+      this.laneHighHeld = false;
+      this.laneLowHeld = false;
+      this.laneChordHeld = false;
+      this.clampPausedPan();
+      this.refreshPausedView(true);
+      return;
+    }
+
     this.hitstopTimer = 0;
     this.hitstopCooldownTimer = 0;
     this.pauseSeq++;
+    this.cancelResumeCountdown();
 
     this.pausedFreq = this.audio.getFrequencyData();
     this.audio.pause();
-    this.pausedAudioSec = this.audio.getEffectiveElapsedSec();
+    this.pausedAudioSec = this.getRunEffectiveAudioSec();
     this.cameraX = this.pausedAudioSec * this.baseSpeed - this.getReticleScreenX();
     this.prevRenderCameraX = this.cameraX;
 
@@ -741,15 +929,20 @@ export class GameEngine {
   }
 
   public async resumeRun(): Promise<void> {
-    if (!this.running || !this.paused || this.finishRecorded) return;
-    const seq = ++this.pauseSeq;
-
-    await this.audio.resume();
-    if (this.pauseSeq !== seq || !this.running || !this.paused || this.finishRecorded) {
+    if (
+      !this.running ||
+      !this.paused ||
+      this.finishRecorded ||
+      this.resumeCountdownSec > 0
+    ) {
       return;
     }
+    const seq = ++this.pauseSeq;
 
-    this.paused = false;
+    cancelAnimationFrame(this.pausedRenderRaf);
+    this.pausedRenderRaf = 0;
+    cancelAnimationFrame(this.rafId);
+
     this.hitstopTimer = 0;
     this.hitstopCooldownTimer = 0;
     this.panX = 0;
@@ -762,11 +955,82 @@ export class GameEngine {
       );
     }
 
-    cancelAnimationFrame(this.pausedRenderRaf);
-    this.pausedRenderRaf = 0;
+    this.resumeCountdownSec = RESUME_COUNTDOWN_TOTAL_SEC;
+    this.lastCountdownStep = 3;
+
+    this.cameraX = this.pausedAudioSec * this.baseSpeed - this.getReticleScreenX();
+    this.prevRenderCameraX = this.cameraX;
+    this.terrain.update(
+      this.cameraX,
+      this.width,
+      this.height,
+      this.elapsedSec,
+      this.pausedFreq,
+      this.computeViewWorldBounds(true)
+    );
+    this.renderCurrentState(this.pausedAudioSec, this.pausedFreq);
+
+    this.audio.sfx.playCountdownTick(3);
+    this.hudDirty = false;
+    this.publishHud(this.audio.getProgress(), this.lastSpeedMultiplier, false);
+
+    await new Promise<void>((resolve) => {
+      const startMs = performance.now();
+      const tickCountdown = (nowMs: number): void => {
+        if (
+          this.pauseSeq !== seq ||
+          !this.running ||
+          !this.paused ||
+          this.finishRecorded
+        ) {
+          this.countdownRafId = 0;
+          resolve();
+          return;
+        }
+
+        const elapsed = Math.max(0, (nowMs - startMs) / 1000);
+        this.resumeCountdownSec = Math.max(0, RESUME_COUNTDOWN_TOTAL_SEC - elapsed);
+
+        if (this.resumeCountdownSec <= 0) {
+          this.countdownRafId = 0;
+          this.lastCountdownStep = null;
+          resolve();
+          return;
+        }
+
+        const nextStep = this.computeCountdownStep(this.resumeCountdownSec);
+        if (nextStep !== null && nextStep !== this.lastCountdownStep) {
+          this.lastCountdownStep = nextStep;
+          this.audio.sfx.playCountdownTick(nextStep);
+          this.publishHud(this.audio.getProgress(), this.lastSpeedMultiplier, false);
+        }
+
+        this.countdownRafId = requestAnimationFrame(tickCountdown);
+      };
+
+      this.countdownRafId = requestAnimationFrame(tickCountdown);
+    });
+
+    if (this.pauseSeq !== seq || !this.running || !this.paused || this.finishRecorded) {
+      return;
+    }
+
+    await this.audio.resume();
+    if (this.pauseSeq !== seq || !this.running || !this.paused || this.finishRecorded) {
+      if (!this.running || this.finishRecorded) {
+        this.audio.stop();
+      } else {
+        this.audio.pause();
+      }
+      return;
+    }
+
+    this.paused = false;
+    this.resumeCountdownSec = 0;
+    this.lastCountdownStep = null;
     this.lastFrameTime = performance.now();
 
-    const effectiveAudioSec = this.audio.getEffectiveElapsedSec();
+    const effectiveAudioSec = this.getRunEffectiveAudioSec();
     this.cameraX = effectiveAudioSec * this.baseSpeed - this.getReticleScreenX();
     this.prevRenderCameraX = this.cameraX;
     const freq = this.audio.getFrequencyData();
@@ -788,7 +1052,9 @@ export class GameEngine {
 
   public togglePause(): void {
     if (!this.running || this.finishRecorded) return;
-    if (this.paused) {
+    if (this.paused && this.resumeCountdownSec > 0) {
+      this.pauseRun();
+    } else if (this.paused) {
       void this.resumeRun();
     } else {
       this.pauseRun();
@@ -804,7 +1070,7 @@ export class GameEngine {
     anchorScreenX?: number,
     anchorScreenY?: number
   ): void {
-    if (!this.running || this.finishRecorded) return;
+    if (!this.running || this.finishRecorded || this.resumeCountdownSec > 0) return;
     const minZ = this.paused ? PAUSED_MIN_ZOOM : LIVE_MIN_ZOOM;
     const maxZ = this.paused ? PAUSED_MAX_ZOOM : LIVE_MAX_ZOOM;
     const clamped = Math.max(minZ, Math.min(maxZ, nextZoom));
@@ -848,7 +1114,9 @@ export class GameEngine {
   }
 
   public panCamera(dxScreenPx: number, dyScreenPx: number): void {
-    if (!this.running || !this.paused || this.finishRecorded) return;
+    if (!this.running || !this.paused || this.finishRecorded || this.resumeCountdownSec > 0) {
+      return;
+    }
     this.hasManualPan = true;
     const zEff = Math.max(0.05, this.getEffectiveZoomScale());
     this.panX -= dxScreenPx / zEff;
@@ -858,7 +1126,7 @@ export class GameEngine {
   }
 
   public resetCameraView(): void {
-    if (!this.running || this.finishRecorded) return;
+    if (!this.running || this.finishRecorded || this.resumeCountdownSec > 0) return;
     this.userZoom = 1.0;
     this.savedLiveZoom = 1.0;
     this.panX = 0;
@@ -907,9 +1175,36 @@ export class GameEngine {
     }
   }
 
+  private computeLastTargetJudgeEndSec(): number {
+    const goodSec = DIFFICULTY_CONFIG[this.difficulty].goodMs / 1000;
+    const allTargets = this.terrain.getAllTargets();
+    let maxEndSec = 0;
+    for (let i = 0; i < allTargets.length; i++) {
+      const t = allTargets[i]!;
+      let endSec: number;
+      if (t.kind === 'chord') {
+        endSec = t.timeSec + goodSec + CHORD_SYNC_WINDOW_SEC;
+      } else if (t.kind === 'hold') {
+        endSec = Math.max(t.timeSec + goodSec, t.endTimeSec ?? t.timeSec + 0.5);
+      } else if (t.kind === 'rush') {
+        endSec = (t.endTimeSec ?? t.timeSec + 1.2) + 0.04;
+      } else if (t.kind === 'sawblade' || t.kind === 'mine') {
+        endSec = t.timeSec + 0.06;
+      } else {
+        endSec = t.timeSec + goodSec;
+      }
+      if (endSec > maxEndSec) {
+        maxEndSec = endSec;
+      }
+    }
+    return maxEndSec;
+  }
+
   private resetState(): void {
     this.paused = false;
     this.pauseSeq++;
+    this.runInstanceId++;
+    this.cancelResumeCountdown();
     this.pausedAudioSec = 0;
     this.pausedFreq = { low: 0.1, mid: 0.1, high: 0.1, overall: 0.1, isBeat: false };
     this.lastSpeedMultiplier = 1.0;
@@ -926,6 +1221,8 @@ export class GameEngine {
     this.hudDirty = true;
     this.finishRecorded = false;
     this.finishedAudioSec = 0;
+    this.postAudioTailSec = 0;
+    this.playbackSettled = false;
     this.lastIsNewRecord = false;
     this.lastScoreDelta = 0;
     this.cinematicZoom = 1.0;
@@ -938,12 +1235,13 @@ export class GameEngine {
     } else {
       this.terrain.reset(this.width, this.height);
     }
+    this.lastTargetJudgeEndSec = this.computeLastTargetJudgeEndSec();
 
     this.playerController.reset();
     this.activeForm = 'synth';
     this.resonanceHoldTimer = 0;
 
-    const initialEffectiveSec = this.audio.getEffectiveElapsedSec();
+    const initialEffectiveSec = this.getRunEffectiveAudioSec();
     this.cameraX = initialEffectiveSec * this.baseSpeed - this.getReticleScreenX();
     this.prevRenderCameraX = this.cameraX;
     this.terrain.update(
@@ -1035,7 +1333,7 @@ export class GameEngine {
       eventTimeStampMs > 0
         ? Math.min(0.045, Math.max(0, (performance.now() - eventTimeStampMs) / 1000))
         : 0;
-    return this.audio.getEffectiveElapsedSec() - inputLagSec;
+    return this.getRunEffectiveAudioSec() - inputLagSec;
   }
 
   private snapPlayerToLane(lane: SlashLane): void {
@@ -1655,6 +1953,7 @@ export class GameEngine {
     this.pausedFreq = freq;
     this.running = false;
     this.paused = false;
+    this.cancelResumeCountdown();
     this.laneHighHeld = false;
     this.laneLowHeld = false;
     this.laneChordHeld = false;
@@ -1674,6 +1973,49 @@ export class GameEngine {
     this.scoreJudge.consumeDirty();
     this.renderCurrentState(audioSec, freq);
     this.publishHud(failProgress, speedMultiplier, true);
+  }
+
+  private sweepUnresolvedTargetsOnFinish(): 'clean' | 'swept' | 'failed' {
+    const allTargets = this.terrain.getAllTargets();
+    let swept = false;
+    for (let i = this.firstUnresolvedIdx; i < allTargets.length; i++) {
+      const t = allTargets[i]!;
+      if (t.resolved) continue;
+      swept = true;
+
+      if (t.kind === 'hold' && t.holdActive) {
+        t.holdActive = false;
+        t.resolved = true;
+        this.scoreJudge.recordGimmickTriggered();
+        const tailBonus = Math.round(
+          240 *
+            this.playerController.profile.chordHoldScoreMult *
+            this.getActiveScoreMultiplier()
+        );
+        this.scoreJudge.addRawScore(tailBonus);
+        this.addResonanceGauge(4.5 * this.playerController.profile.gaugeChargeMult);
+        continue;
+      }
+
+      if (t.kind === 'sawblade' || t.kind === 'mine') {
+        t.resolved = true;
+        continue;
+      }
+
+      t.chordPartialLane = undefined;
+      t.chordPartialSec = undefined;
+      t.chordPartialSignedMs = undefined;
+      t.resolved = true;
+      t.hitGrade = 'MISS';
+      this.handleMissedTarget(t, t.kind === 'chord' || t.kind === 'rush');
+      if (!this.isFailed && this.difficulty !== 'casual' && this.grooveHp <= 0) {
+        return 'failed';
+      }
+    }
+    if (swept) {
+      this.firstUnresolvedIdx = allTargets.length;
+    }
+    return swept ? 'swept' : 'clean';
   }
 
   private getActiveScoreMultiplier(): number {
@@ -1756,7 +2098,10 @@ export class GameEngine {
   private updateFrame(dt: number): void {
     if (this.paused) return;
     const freq = this.audio.getFrequencyData();
-    const effectiveAudioSec = this.audio.getEffectiveElapsedSec();
+    if (!this.audio.playing && this.audio.getElapsedSec() > 0 && this.elapsedSec > 0.5) {
+      this.postAudioTailSec += dt;
+    }
+    const effectiveAudioSec = this.getRunEffectiveAudioSec();
 
     if (this.hitstopCooldownTimer > 0) {
       this.hitstopCooldownTimer = Math.max(0, this.hitstopCooldownTimer - dt);
@@ -1879,12 +2224,50 @@ export class GameEngine {
     this.renderCurrentState(effectiveAudioSec, freq);
 
     const progress = this.audio.getProgress();
+    const dur = this.audio.getDurationSec();
+    const rawElapsed = this.audio.getElapsedSec();
+    const audioEndedNaturally =
+      (!this.audio.playing && rawElapsed > 0 && this.elapsedSec > 0.5) ||
+      (dur > 0 && rawElapsed >= dur - 0.02);
+    const allTargetsWindowPassed = effectiveAudioSec >= this.lastTargetJudgeEndSec + 0.05;
+    const fallbackTimeout =
+      this.postAudioTailSec >= 1.5 ||
+      (dur > 0 && rawElapsed >= dur + 1.5) ||
+      (this.playbackSettled &&
+        !this.audio.playing &&
+        rawElapsed === 0 &&
+        this.elapsedSec > 2.5);
     const isFinished =
-      !this.paused && (progress >= 0.995 || (!this.audio.playing && this.elapsedSec > 2.0));
+      !this.paused && ((audioEndedNaturally && allTargetsWindowPassed) || fallbackTimeout);
+
     if (isFinished) {
+      const sweepStatus = this.sweepUnresolvedTargetsOnFinish();
+      if (sweepStatus === 'failed') {
+        this.triggerStageFail(effectiveAudioSec, freq, speedMultiplier);
+        return;
+      }
+      if (sweepStatus === 'swept') {
+        this.terrain.update(
+          this.cameraX,
+          this.width,
+          this.height,
+          this.elapsedSec,
+          freq,
+          this.computeViewWorldBounds(true)
+        );
+        this.renderCurrentState(effectiveAudioSec, freq);
+      }
+
       this.running = false;
       this.finishedAudioSec = effectiveAudioSec;
       this.pausedFreq = freq;
+      this.laneHighHeld = false;
+      this.laneLowHeld = false;
+      this.laneChordHeld = false;
+      this.isGrinding = false;
+      this.activeRushCombo = 0;
+      this.audio.stop();
+
       if (!this.finishRecorded && !this.isFailed) {
         this.finishRecorded = true;
         const { accuracy, rank } = this.scoreJudge.computeAccuracyAndRank();
@@ -1897,6 +2280,8 @@ export class GameEngine {
             maxCombo: this.scoreJudge.maxCombo,
             starsCollected: this.scoreJudge.starsCollected,
             judgmentCounts,
+            orbsCollected: this.scoreJudge.orbsCollected,
+            totalOrbs: this.terrain.getTotalSlashTargetCount(),
           });
           this.lastIsNewRecord = saved.isNewRecord;
           this.lastScoreDelta = saved.scoreDelta;
@@ -1914,7 +2299,7 @@ export class GameEngine {
     ) {
       this.hudPublishAccum = 0;
       this.hudDirty = false;
-      this.publishHud(progress, speedMultiplier, isFinished);
+      this.publishHud(isFinished ? 1.0 : progress, speedMultiplier, isFinished);
     }
   }
 
@@ -2253,14 +2638,16 @@ export class GameEngine {
 
     let shakeX = 0;
     let shakeY = 0;
-    if (this.shakeTimer > 0 && !this.paused) {
-      const decay = this.shakeTimer / Math.max(0.01, this.shakeDuration);
-      shakeX = Math.sin(this.elapsedSec * 67) * this.shakeIntensity * decay;
-      shakeY = Math.cos(this.elapsedSec * 53) * this.shakeIntensity * decay;
-    }
-    if (this.hitstopTimer > 0 && !this.paused) {
-      shakeX += Math.sin(this.elapsedSec * 190) * 2.2;
-      shakeY += Math.cos(this.elapsedSec * 163) * 1.6;
+    if (!this.reducedMotion && !this.paused) {
+      if (this.shakeTimer > 0) {
+        const decay = this.shakeTimer / Math.max(0.01, this.shakeDuration);
+        shakeX = Math.sin(this.elapsedSec * 67) * this.shakeIntensity * decay;
+        shakeY = Math.cos(this.elapsedSec * 53) * this.shakeIntensity * decay;
+      }
+      if (this.hitstopTimer > 0) {
+        shakeX += Math.sin(this.elapsedSec * 190) * 2.2;
+        shakeY += Math.cos(this.elapsedSec * 163) * 1.6;
+      }
     }
 
     this.renderer?.renderGameFrame({
@@ -2269,7 +2656,7 @@ export class GameEngine {
       timeSec: this.elapsedSec,
       audioSec,
       worldPxPerSec: this.baseSpeed,
-      beatPulse: this.beatPulse,
+      beatPulse: this.reducedMotion ? this.beatPulse * 0.25 : this.beatPulse,
       combo: this.scoreJudge.combo,
       overdriveActive: this.overdriveTimer > 0,
       overdriveRatio: this.overdriveTimer / OVERDRIVE_DURATION_SEC,
@@ -2316,11 +2703,18 @@ export class GameEngine {
     isFinished: boolean
   ): void {
     const { accuracy, rank } = this.scoreJudge.computeAccuracyAndRank();
-    const neutralPan = this.paused ? this.getClampedNeutralPausedPan() : { panX: 0, panY: 0 };
+    const neutralPan =
+      this.paused && this.resumeCountdownSec <= 0
+        ? this.getClampedNeutralPausedPan()
+        : { panX: 0, panY: 0 };
     const isPanned =
       Math.abs(this.panX - neutralPan.panX) > 1 ||
       Math.abs(this.panY - neutralPan.panY) > 1 ||
       Math.abs(this.userZoom - 1) > 0.01;
+    const resumeCountdown: 3 | 2 | 1 | null =
+      this.paused && this.resumeCountdownSec > 0
+        ? this.computeCountdownStep(this.resumeCountdownSec)
+        : null;
 
     this.onHudUpdate({
       rendererMode: this.rendererMode,
@@ -2366,6 +2760,7 @@ export class GameEngine {
       chordKeyFlash: this.laneChordHeld || this.chordKeyFlashTimer > 0,
       rushCombo: this.activeRushCombo > 0 ? this.activeRushCombo : undefined,
       audioOffsetMs: this.audio.getAudioOffsetMs(),
+      resumeCountdown,
     });
   }
 

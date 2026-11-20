@@ -40,3 +40,11 @@ export function trackArtist(t: Messages, track: TrackMetadata): string {
   }
   return track.isCustom ? t.tracks.customArtist : track.artist;
 }
+
+/** Formats duration in seconds as `m:ss` (e.g. `167 -> "2:47"`, `226 -> "3:46"`). */
+export function formatDurationMmSs(seconds: number): string {
+  const safeTotal = Number.isFinite(seconds) ? Math.max(0, Math.round(seconds)) : 0;
+  const mins = Math.floor(safeTotal / 60);
+  const secs = safeTotal % 60;
+  return `${mins}:${secs < 10 ? `0${secs}` : String(secs)}`;
+}

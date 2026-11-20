@@ -7,8 +7,15 @@ export interface PauseOverlayProps {
   hud: HUDTelemetry;
   trackTitle: string;
   audioOffsetMs: number;
+  bgmVolume: number;
+  sfxVolume: number;
+  reducedMotion: boolean;
   onChangeAudioOffset: (nextOffsetMs: number) => void;
+  onChangeBgmVolume: (volume: number) => void;
+  onChangeSfxVolume: (volume: number) => void;
+  onToggleReducedMotion: () => void;
   onResume: () => void;
+  onQuickRetry: () => void;
   onReturnToMenu: () => void;
   onSetZoom: (zoom: number) => void;
   onStepZoom: (factor: number) => void;
@@ -36,8 +43,15 @@ export const PauseOverlay: React.FC<PauseOverlayProps> = ({
   hud,
   trackTitle,
   audioOffsetMs,
+  bgmVolume,
+  sfxVolume,
+  reducedMotion,
   onChangeAudioOffset,
+  onChangeBgmVolume,
+  onChangeSfxVolume,
+  onToggleReducedMotion,
   onResume,
+  onQuickRetry,
   onReturnToMenu,
   onSetZoom,
   onStepZoom,
@@ -47,12 +61,15 @@ export const PauseOverlay: React.FC<PauseOverlayProps> = ({
   const { t } = useI18n();
   const isCoarsePointer = useCoarsePointer();
   const ctrlGuide = isCoarsePointer ? t.menu.controlsTouch : t.menu.controls;
+  const retryLabel = isCoarsePointer ? t.pause.retryTouchBtn : t.pause.retryBtn;
   const [collapsed, setCollapsed] = useState(false);
 
   const currentZoom = hud.userZoom ?? 1.0;
   const progressPct = Math.min(100, Math.max(0, Math.round(hud.progress * 100)));
   const isViewDefault = !hud.isPanned && Math.abs(currentZoom - 1) < 0.01;
   const offsetText = `${audioOffsetMs > 0 ? '+' : ''}${audioOffsetMs}ms`;
+  const bgmPct = Math.round(bgmVolume * 100);
+  const sfxPct = Math.round(sfxVolume * 100);
 
   const presets: ReadonlyArray<{ value: number; testId: string; label: string }> = [
     { value: 0.25, testId: 'pause-preset-0.25', label: t.pause.presetWide },
@@ -80,6 +97,14 @@ export const PauseOverlay: React.FC<PauseOverlayProps> = ({
             onClick={() => setCollapsed(false)}
           >
             {t.pause.showPanel}
+          </button>
+          <button
+            type="button"
+            data-testid="pause-pill-retry-btn"
+            className="hud-btn pause-pill-btn"
+            onClick={onQuickRetry}
+          >
+            {retryLabel}
           </button>
           <button
             type="button"
@@ -116,7 +141,7 @@ export const PauseOverlay: React.FC<PauseOverlayProps> = ({
             </button>
           </div>
 
-          {/* Row 2: Primary Actions — Resume Game & Return to Main Menu */}
+          {/* Row 2: Primary Actions — Resume, Quick Retry [R], & Return to Main Menu */}
           <div className="pause-actions-row">
             <button
               type="button"
@@ -125,6 +150,14 @@ export const PauseOverlay: React.FC<PauseOverlayProps> = ({
               onClick={onResume}
             >
               {t.pause.resumeBtn}
+            </button>
+            <button
+              type="button"
+              data-testid="pause-retry-btn"
+              className="secondary-btn pause-action-btn"
+              onClick={onQuickRetry}
+            >
+              {retryLabel}
             </button>
             <button
               type="button"
@@ -176,6 +209,50 @@ export const PauseOverlay: React.FC<PauseOverlayProps> = ({
                 {t.pause.audioSyncReset}
               </button>
             </div>
+          </div>
+
+          {/* Row 4: Compact Single-Row BGM / SFX Volume & Reduced-Motion Settings */}
+          <div className="pause-audio-settings-row" data-testid="pause-audio-settings">
+            <label className="audio-mini-slider">
+              <span className="audio-mini-label">{t.pause.bgmLabel}</span>
+              <input
+                type="range"
+                className="audio-mini-range"
+                data-testid="pause-bgm-slider"
+                min={0}
+                max={100}
+                step={1}
+                value={bgmPct}
+                aria-label={t.menu.bgmAria}
+                onChange={(e) => onChangeBgmVolume(Number(e.target.value) / 100)}
+              />
+              <span className="audio-mini-val">{bgmPct}%</span>
+            </label>
+            <label className="audio-mini-slider">
+              <span className="audio-mini-label">{t.pause.sfxLabel}</span>
+              <input
+                type="range"
+                className="audio-mini-range"
+                data-testid="pause-sfx-slider"
+                min={0}
+                max={100}
+                step={1}
+                value={sfxPct}
+                aria-label={t.menu.sfxAria}
+                onChange={(e) => onChangeSfxVolume(Number(e.target.value) / 100)}
+              />
+              <span className="audio-mini-val">{sfxPct}%</span>
+            </label>
+            <button
+              type="button"
+              className={`motion-toggle-chip${reducedMotion ? ' active' : ''}`}
+              data-testid="pause-reduced-motion-btn"
+              aria-pressed={reducedMotion}
+              title={t.menu.reducedMotionTipTitle}
+              onClick={onToggleReducedMotion}
+            >
+              {reducedMotion ? t.pause.reducedMotionOn : t.pause.reducedMotionOff}
+            </button>
           </div>
 
           {/* Row 4: ThorVG Vector Zoom & Live CPU/GPU Compare */}

@@ -38,7 +38,13 @@ export const ResultModal: React.FC<ResultModalProps> = ({
   const rankColor = isFailed ? '#FF2A6D' : RANK_COLORS[rank];
   const accuracy = (hud.accuracy ?? 100).toFixed(1);
   const counts = hud.judgmentCounts ?? { perfect: 0, great: 0, good: 0, miss: 0 };
-  const isNoMiss = !isFailed && counts.miss === 0;
+  const judgedHits = counts.perfect + counts.great + counts.good;
+  const expectedTargets = hud.totalOrbs ?? 0;
+  const allTargetsCleared =
+    expectedTargets > 0
+      ? (hud.orbsCollected ?? judgedHits) >= expectedTargets && judgedHits >= expectedTargets
+      : judgedHits > 0;
+  const isNoMiss = !isFailed && counts.miss === 0 && allTargetsCleared;
   const failedProgressPct = Math.min(99, Math.max(0, Math.round(hud.progress * 100)));
 
   return (
