@@ -2,11 +2,20 @@ import type { BannerMessage, TrackMetadata } from '../types/game';
 import { formatMessage, type Messages } from './messages';
 
 /** Resolves a language-agnostic engine banner into localized text. */
-export function resolveBanner(t: Messages, banner: BannerMessage): string {
+export function resolveBanner(
+  t: Messages,
+  banner: BannerMessage,
+  isCoarsePointer: boolean = false
+): string {
   const form = banner.params?.form;
   const formText = form ? t.forms[form] : null;
   const bonusVal = banner.params?.bonus;
-  return formatMessage(t.banner[banner.key], {
+  const touchTemplate =
+    isCoarsePointer && Object.prototype.hasOwnProperty.call(t.bannerTouch, banner.key)
+      ? t.bannerTouch[banner.key as keyof Messages['bannerTouch']]
+      : undefined;
+  const template = touchTemplate ?? t.banner[banner.key];
+  return formatMessage(template, {
     form: formText?.name ?? '',
     band: formText?.band ?? '',
     count: banner.params?.count ?? 0,

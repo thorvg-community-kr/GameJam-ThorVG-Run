@@ -1,8 +1,10 @@
 import React from 'react';
+import { useCoarsePointer } from '../hooks/useCoarsePointer';
 import { useI18n } from '../i18n/I18nProvider';
 import {
   FORM_CONFIG,
   type HUDTelemetry,
+  type JudgmentTelemetry,
   type RendererMode,
   type ResultRank,
 } from '../types/game';
@@ -22,6 +24,21 @@ const RANK_COLORS: Record<ResultRank, string> = {
   C: '#FF2A6D',
 };
 
+const EMPTY_TELEMETRY: JudgmentTelemetry = {
+  criticalCount: 0,
+  fastCount: 0,
+  slowCount: 0,
+  timedHitCount: 0,
+  meanSignedDeltaMs: 0,
+};
+
+function formatSignedMs(value: number): string {
+  if (!Number.isFinite(value)) return '0.0ms';
+  const rounded = Math.round(value * 10) / 10;
+  if (Math.abs(rounded) < 1e-6) return '0.0ms';
+  return `${rounded > 0 ? '+' : ''}${rounded.toFixed(1)}ms`;
+}
+
 export const ResultModal: React.FC<ResultModalProps> = ({
   hud,
   trackTitle,
@@ -30,6 +47,7 @@ export const ResultModal: React.FC<ResultModalProps> = ({
   onReturnToMenu,
 }) => {
   const { t, format } = useI18n();
+  const isCoarsePointer = useCoarsePointer();
   const formCfg = FORM_CONFIG[hud.activeForm];
   const nextMode: RendererMode = hud.rendererMode === 'sw' ? 'gl' : 'sw';
   const isFailed = Boolean(hud.isFailed);
@@ -38,6 +56,25 @@ export const ResultModal: React.FC<ResultModalProps> = ({
   const rankColor = isFailed ? '#FF2A6D' : RANK_COLORS[rank];
   const accuracy = (hud.accuracy ?? 100).toFixed(1);
   const counts = hud.judgmentCounts ?? { perfect: 0, great: 0, good: 0, miss: 0 };
+  const telemetry = hud.judgmentTelemetry ?? EMPTY_TELEMETRY;
+  const showSyncHint =
+    telemetry.timedHitCount >= 1 && Math.abs(telemetry.meanSignedDeltaMs) >= 15;
+  const suggestMs = Math.min(
+    150,
+    Math.max(15, Math.round(Math.abs(telemetry.meanSignedDeltaMs) / 5) * 5)
+  );
+  const syncHintText = showSyncHint
+    ? format(
+        telemetry.meanSignedDeltaMs > 0
+          ? isCoarsePointer
+            ? t.result.syncHintLateTouch
+            : t.result.syncHintLate
+          : isCoarsePointer
+            ? t.result.syncHintEarlyTouch
+            : t.result.syncHintEarly,
+        { ms: suggestMs }
+      )
+    : '';
   const judgedHits = counts.perfect + counts.great + counts.good;
   const expectedTargets = hud.totalOrbs ?? 0;
   const allTargetsCleared =
@@ -51,6 +88,9 @@ export const ResultModal: React.FC<ResultModalProps> = ({
     <div className="result-modal-backdrop">
       <div
         className={`result-modal-card${isFailed ? ' is-failed' : ''}`}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="result-modal-title"
         style={{ borderColor: isFailed ? '#FF2A6D' : formCfg.colorHex }}
       >
         {isFailed ? (
@@ -60,7 +100,7 @@ export const ResultModal: React.FC<ResultModalProps> = ({
         ) : (
           <span className="result-badge">{t.result.badge}</span>
         )}
-        <h2>{trackTitle}</h2>
+        <h2 id="result-modal-title">{trackTitle}</h2>
 
         {!isFailed && (hud.isNewRecord || isNoMiss) && (
           <div className="result-honors-row">
@@ -108,6 +148,33 @@ export const ResultModal: React.FC<ResultModalProps> = ({
                 miss: counts.miss,
               })}
             </span>
+            <div className="result-timing-telemetry-row" data-testid="result-timing-telemetry">
+              <span className="result-telemetry-chip tone-gold" data-testid="result-critical-stat">
+                {format(t.result.criticalStat, { count: telemetry.criticalCount })}
+              </span>
+              <span className="result-telemetry-chip tone-cyan" data-testid="result-fast-slow-stat">
+                {format(t.result.fastSlowStat, {
+                  fast: telemetry.fastCount,
+                  slow: telemetry.slowCount,
+                })}
+              </span>
+              <span
+                className="result-telemetry-chip tone-neutral"
+                data-testid="result-mean-delta-stat"
+              >
+                {format(t.result.meanDeltaStat, {
+                  value:
+                    telemetry.timedHitCount > 0
+                      ? formatSignedMs(telemetry.meanSignedDeltaMs)
+                      : '0.0ms',
+                })}
+              </span>
+            </div>
+            {showSyncHint && (
+              <div className="result-sync-hint-pill" data-testid="result-sync-offset-hint">
+                {syncHintText}
+              </div>
+            )}
           </div>
         </div>
 
@@ -155,7 +222,11 @@ export const ResultModal: React.FC<ResultModalProps> = ({
             className="primary-btn"
             onClick={onReplay}
           >
-            {isFailed ? t.result.instantRetry : t.result.replay}
+            {isFailed
+              ? isCoarsePointer
+                ? t.result.instantRetryTouch
+                : t.result.instantRetry
+              : t.result.replay}
           </button>
           <button
             type="button"

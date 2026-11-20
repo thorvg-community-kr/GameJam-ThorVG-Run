@@ -34,6 +34,9 @@ const OVERDRIVE_DURATION_SEC = 8.0;
 const RESUME_COUNTDOWN_TOTAL_SEC = 1.35; // 0.45s * 3 steps (3 -> 2 -> 1)
 const HUD_PUBLISH_INTERVAL_SEC = 0.05; // 20Hz steady telemetry + 0ms instant flush on discrete dirty events
 const KEY_FLASH_DURATION_SEC = 0.09;
+const HOLD_TAIL_COMPLETION_GRACE_SEC = 0.12;
+const HOLD_KEY_BOUNCE_GRACE_SEC = 0.065;
+const HOLD_RESUME_GRACE_SEC = 0.18;
 const LIVE_MIN_ZOOM = 0.35;
 const LIVE_MAX_ZOOM = 4.0;
 const PAUSED_MIN_ZOOM = 0.2;
@@ -112,6 +115,7 @@ export class GameEngine {
   private runCycleTime: number = 0;
   private firstUnresolvedIdx: number = 0;
   private activeRushCombo: number = 0;
+  private readonly brokenHoldTargets: BeatTarget[] = [];
 
   // Live Key Hold & Receptor Flash State
   private laneHighHeld: boolean = false;
@@ -709,6 +713,7 @@ export class GameEngine {
     this.prevRenderCameraX = this.cameraX;
     this.impactZoomPunch = 0;
     this.videoBackgroundActive = false;
+    this.brokenHoldTargets.length = 0;
     cancelAnimationFrame(this.rafId);
     cancelAnimationFrame(this.pausedRenderRaf);
     this.pausedRenderRaf = 0;
@@ -1071,6 +1076,17 @@ export class GameEngine {
     this.lastCountdownStep = null;
     this.lastFrameTime = performance.now();
 
+    const allTargets = this.terrain.getAllTargets();
+    for (let i = this.firstUnresolvedIdx; i < allTargets.length; i++) {
+      const t = allTargets[i]!;
+      if (!t.resolved && t.kind === 'hold' && t.holdActive) {
+        t.holdReleaseGraceSec = Math.max(
+          t.holdReleaseGraceSec ?? 0,
+          HOLD_RESUME_GRACE_SEC
+        );
+      }
+    }
+
     const effectiveAudioSec = this.getRunEffectiveAudioSec();
     this.cameraX = effectiveAudioSec * this.baseSpeed - this.getReticleScreenX();
     this.prevRenderCameraX = this.cameraX;
@@ -1276,6 +1292,13 @@ export class GameEngine {
     } else {
       this.terrain.reset(this.width, this.height);
     }
+    const resetTargets = this.terrain.getAllTargets();
+    for (let i = 0; i < resetTargets.length; i++) {
+      const t = resetTargets[i]!;
+      t.holdHeadCritical = undefined;
+      t.holdBroken = undefined;
+    }
+    this.brokenHoldTargets.length = 0;
     this.lastTargetJudgeEndSec = this.computeLastTargetJudgeEndSec();
 
     this.playerController.reset();
@@ -1340,7 +1363,7 @@ export class GameEngine {
   }
 
   public setLaneHeld(lane: SlashLane | 'chord', held: boolean): void {
-    if (!this.running || this.paused) {
+    if (!this.running || (this.paused && this.resumeCountdownSec <= 0)) {
       this.laneHighHeld = false;
       this.laneLowHeld = false;
       this.laneChordHeld = false;
@@ -1495,7 +1518,8 @@ export class GameEngine {
         600,
         0,
         true,
-        'chord'
+        'chord',
+        true
       );
       this.audio.sfx.playHazardShatter();
       this.audio.triggerSidechainDuck(0.75, 0.065);
@@ -1778,8 +1802,10 @@ export class GameEngine {
       grade === 'PERFECT' && this.scoreJudge.isCriticalDeltaMs(deltaMs, this.difficulty);
 
     target.holdActive = true;
+    target.holdBroken = false;
+    target.holdHeadCritical = isCritical;
     target.hitGrade = grade;
-    target.holdReleaseGraceSec = 0.075;
+    target.holdReleaseGraceSec = HOLD_KEY_BOUNCE_GRACE_SEC;
     target.holdNextTickSec = hitAudioSec + 0.1;
     this.isGrinding = true;
     this.shiftActiveForm(
@@ -2073,7 +2099,8 @@ export class GameEngine {
     basePoints: number,
     signedDeltaMs: number | undefined,
     isCritical: boolean,
-    lane: SlashLane | 'chord'
+    lane: SlashLane | 'chord',
+    excludeFromTimingStats: boolean = false
   ): number {
     const bonusPoints = this.scoreJudge.recordJudgment(
       grade,
@@ -2081,7 +2108,7 @@ export class GameEngine {
       basePoints,
       this.getActiveScoreMultiplier(),
       signedDeltaMs,
-      { isCritical, lane }
+      { isCritical, lane, excludeFromTimingStats }
     );
 
     const profile = this.playerController.profile;
@@ -2113,6 +2140,51 @@ export class GameEngine {
       this.vfx.spawnBurst(screenX, screenY, [180, 220, 255], 5);
     }
     return bonusPoints;
+  }
+
+  private completeHoldTail(target: BeatTarget, screenX: number, laneY: number): void {
+    target.holdActive = false;
+    target.holdBroken = false;
+    target.resolved = true;
+    this.scoreJudge.recordGimmickTriggered();
+    const tailBonus = Math.round(
+      240 *
+        this.playerController.profile.chordHoldScoreMult *
+        this.getActiveScoreMultiplier()
+    );
+    this.scoreJudge.addRawScore(tailBonus);
+    this.addResonanceGauge(4.5 * this.playerController.profile.gaugeChargeMult);
+    this.audio.sfx.playSlashHit(target.lane, 'PERFECT', true);
+    this.vfx.spawnSlicedEnemy(
+      screenX,
+      laneY,
+      target.radius,
+      target.lane === 'high' ? -0.35 : 0.35,
+      target.lane === 'high' ? CYAN_RGB : CRIMSON_RGB,
+      false
+    );
+    this.vfx.spawnBurst(
+      screenX,
+      laneY,
+      target.lane === 'high' ? CYAN_RGB : CRIMSON_RGB,
+      12
+    );
+  }
+
+  private handleHoldEarlyRelease(target: BeatTarget, screenX: number, laneY: number): void {
+    const prevGrade: JudgmentGrade = target.hitGrade ?? 'GOOD';
+    const prevWasCritical = Boolean(target.holdHeadCritical);
+    target.holdActive = false;
+    target.holdBroken = true;
+    target.resolved = true;
+    target.hitGrade = 'GOOD';
+    this.brokenHoldTargets.push(target);
+    this.scoreJudge.recordHoldBreak(prevGrade, prevWasCritical, target.lane);
+    this.surfMomentum = Math.max(0.18, this.surfMomentum * 0.72);
+    this.setBanner({ key: 'holdBreak' }, 1.15);
+    this.audio.sfx.playHoldBreak();
+    this.vfx.spawnBurst(screenX, laneY, CRIMSON_RGB, 10);
+    this.hudDirty = true;
   }
 
   private loop = (now: number): void => {
@@ -2419,36 +2491,15 @@ export class GameEngine {
           const laneY = target.lane === 'high' ? highY : lowY;
           const isHeld = target.lane === 'high' ? this.laneHighHeld : this.laneLowHeld;
 
-          if (effectiveAudioSec >= endSec - 0.05) {
-            // [Fix 4] HOLD ribbon tail completion
-            target.holdActive = false;
-            target.resolved = true;
-            this.scoreJudge.recordGimmickTriggered();
-            const tailBonus = Math.round(
-              240 *
-                this.playerController.profile.chordHoldScoreMult *
-                this.getActiveScoreMultiplier()
-            );
-            this.scoreJudge.addRawScore(tailBonus);
-            this.addResonanceGauge(4.5 * this.playerController.profile.gaugeChargeMult);
-            this.audio.sfx.playSlashHit(target.lane, 'PERFECT', true);
-            this.vfx.spawnSlicedEnemy(
-              reticleScreenX,
-              laneY,
-              target.radius,
-              target.lane === 'high' ? -0.35 : 0.35,
-              target.lane === 'high' ? CYAN_RGB : CRIMSON_RGB,
-              false
-            );
-            this.vfx.spawnBurst(
-              reticleScreenX,
-              laneY,
-              target.lane === 'high' ? CYAN_RGB : CRIMSON_RGB,
-              12
-            );
+          if (
+            effectiveAudioSec >= endSec - 0.05 ||
+            (!isHeld && effectiveAudioSec >= endSec - HOLD_TAIL_COMPLETION_GRACE_SEC)
+          ) {
+            // [Fix 4] HOLD ribbon tail completion (includes 120ms pre-tail release grace)
+            this.completeHoldTail(target, reticleScreenX, laneY);
           } else if (isHeld) {
             activeHoldLane = target.lane;
-            target.holdReleaseGraceSec = 0.075;
+            target.holdReleaseGraceSec = HOLD_KEY_BOUNCE_GRACE_SEC;
             let safetyTicks = 0;
             while (
               effectiveAudioSec >= (target.holdNextTickSec ?? effectiveAudioSec) &&
@@ -2475,10 +2526,10 @@ export class GameEngine {
               );
             }
           } else {
-            target.holdReleaseGraceSec = (target.holdReleaseGraceSec ?? 0.075) - dt;
+            target.holdReleaseGraceSec =
+              (target.holdReleaseGraceSec ?? HOLD_KEY_BOUNCE_GRACE_SEC) - dt;
             if (target.holdReleaseGraceSec <= 0) {
-              target.holdActive = false;
-              target.resolved = true;
+              this.handleHoldEarlyRelease(target, reticleScreenX, laneY);
             } else {
               activeHoldLane = target.lane;
             }
@@ -2505,14 +2556,14 @@ export class GameEngine {
             this.scoreJudge.recordOrbCollected();
             this.collectPrismStarIfPresent(target, reticleScreenX, midY);
             this.audio.sfx.playSlashHit('chord', 'GREAT', false);
-            this.emitSlashJudgment('GREAT', reticleScreenX, midY, 0, 380, 0, false, 'chord');
+            this.emitSlashJudgment('GREAT', reticleScreenX, midY, 0, 380, 0, false, 'chord', true);
             this.vfx.spawnSlicedEnemy(reticleScreenX, midY, target.radius, -0.45, GOLD_RGB);
           } else if (hits > 0) {
             target.hitGrade = 'GOOD';
             this.scoreJudge.recordOrbCollected();
             this.collectPrismStarIfPresent(target, reticleScreenX, midY);
             this.audio.sfx.playSlashHit('chord', 'GOOD', false);
-            this.emitSlashJudgment('GOOD', reticleScreenX, midY, 0, 200, 0, false, 'chord');
+            this.emitSlashJudgment('GOOD', reticleScreenX, midY, 0, 200, 0, false, 'chord', true);
             this.vfx.spawnSlicedEnemy(reticleScreenX, midY, target.radius, -0.35, CYAN_RGB);
           } else {
             target.hitGrade = 'MISS';
@@ -2691,6 +2742,25 @@ export class GameEngine {
       }
     }
 
+    const highScreenY = this.terrain.getLaneHighScreenY();
+    const lowScreenY = this.terrain.getLaneLowScreenY();
+    let renderTargets = this.terrain.getTargets();
+    if (this.brokenHoldTargets.length > 0) {
+      const bounds = this.computeViewWorldBounds(false);
+      const visibleBroken: BeatTarget[] = [];
+      for (let i = 0; i < this.brokenHoldTargets.length; i++) {
+        const bt = this.brokenHoldTargets[i]!;
+        const endWx = bt.endWorldX ?? bt.worldX;
+        if (bt.worldX <= bounds.maxX + 180 && endWx >= bounds.minX - 180) {
+          bt.screenY = bt.lane === 'high' ? highScreenY : lowScreenY;
+          visibleBroken.push(bt);
+        }
+      }
+      if (visibleBroken.length > 0) {
+        renderTargets = [...renderTargets, ...visibleBroken];
+      }
+    }
+
     this.renderer?.renderGameFrame({
       width: this.width,
       height: this.height,
@@ -2715,12 +2785,12 @@ export class GameEngine {
       frequency: freq,
       segments: this.terrain.getSegments(),
       reticleScreenX: this.getReticleScreenX(),
-      laneHighScreenY: this.terrain.getLaneHighScreenY(),
-      laneLowScreenY: this.terrain.getLaneLowScreenY(),
+      laneHighScreenY: highScreenY,
+      laneLowScreenY: lowScreenY,
       playerLane: this.playerLane,
       reticlePulseHigh: this.reticlePulseHigh,
       reticlePulseLow: this.reticlePulseLow,
-      targets: this.terrain.getTargets(),
+      targets: renderTargets,
       slicedHalves: this.vfx.getSlicedHalves(),
       playerScreenX: this.getPlayerRenderScreenX(),
       playerScreenY: this.getRenderPlayerY(),
@@ -2790,6 +2860,8 @@ export class GameEngine {
       rank,
       judgment: this.scoreJudge.activeJudgment,
       judgmentCounts: this.scoreJudge.snapshotCounts(),
+      judgmentTelemetry: this.scoreJudge.snapshotTelemetry(),
+      holdBreaks: this.scoreJudge.holdBreaks,
       gimmicksTriggered: this.scoreJudge.gimmicksTriggered,
       isNewRecord: this.lastIsNewRecord,
       scoreDelta: this.lastScoreDelta,

@@ -74,6 +74,8 @@ export const en = {
     videoBgTipTitle: 'MP4 / WebM Video Background',
     videoBgTipBody:
       'Plays the uploaded video synchronized behind the ThorVG vector stage. Press [V] anytime in-game to switch.',
+    videoBgTipTouchBody:
+      'Plays the uploaded video synchronized behind the ThorVG vector stage. Use the Video button in-game or Pause to switch.',
     previewPlayBtn: '♪ Preview',
     previewStopBtn: '■ Stop',
     previewTipTitle: 'Highlight Stream Preview',
@@ -175,6 +177,8 @@ export const en = {
     tipTitle: '⚔️ HOW TO PLAY 2-LANE RHYTHM SLASHER',
     tipBody:
       'Slash Upper [F/W/↑/Click · Top Tap] (dodge saws) & Lower [J/S/↓/R-Click · Low Tap] (dodge mines) in Dual Reticles! Hit [Space / CROSS] for Gold Chords & [Shift / Tap] Overdrive!',
+    tipTouchBody:
+      'Tap Upper HIGH (dodge saws) & Lower LOW (dodge mines) right in the Dual Reticles! 2-finger tap or CROSS pad for Gold Chords & tap Overdrive at 100%!',
   },
   upload: {
     dropzone: 'Add Audio / MP4',
@@ -282,6 +286,9 @@ export const en = {
     sfxFull: '🔊 SFX: FULL [M]',
     sfxImpact: '🥁 SFX: IMPACT [M]',
     sfxOff: '🔇 SFX: OFF [M]',
+    sfxFullTouch: '🔊 SFX: FULL',
+    sfxImpactTouch: '🥁 SFX: IMPACT',
+    sfxOffTouch: '🔇 SFX: OFF',
     stars: '★ {collected}/{total}',
     noMissLive: '👑 NO MISS',
     fastMs: 'FAST -{ms}ms',
@@ -297,14 +304,20 @@ export const en = {
     zoomReset: '1x',
     zoomInTitle: 'Zoom In (+ / Wheel)',
     zoomOutTitle: 'Zoom Out (- / Wheel)',
+    zoomInTitleTouch: 'Zoom In (+ / Pinch)',
+    zoomOutTitleTouch: 'Zoom Out (- / Pinch)',
     cinematicAuto: '🎬 AUTO [C]',
     cinematicFixed: '🎬 1x [C]',
+    cinematicAutoTouch: '🎬 AUTO',
+    cinematicFixedTouch: '🎬 1x',
     cinematicTitle: 'Toggle Dynamic Vector Cinematic Camera [C]',
+    cinematicTitleTouch: 'Toggle Dynamic Vector Cinematic Camera',
     videoBgOn: '🎬 Video [V]',
     videoBgOff: '🌌 Default [V]',
     videoBgOnTouch: '🎬 Video',
     videoBgOffTouch: '🌌 Default',
     videoBgTitle: 'Switch between MP4 video background and default vector background [V]',
+    videoBgTitleTouch: 'Switch between MP4 video background and default vector background',
     grooveHp: 'GROOVE HP {hp}%',
     grooveDangerTag: 'CRITICAL',
     chillNoFail: '🛡️ CASUAL MODE · NO-FAIL GROOVE',
@@ -327,6 +340,7 @@ export const en = {
     badge: '⏸ PAUSED · THORVG VECTOR INSPECTOR',
     title: 'Game Paused',
     resumeBtn: '▶ Resume Game [Esc]',
+    resumeTouchBtn: '▶ Resume Game',
     retryBtn: '↻ Retry [R]',
     retryTouchBtn: '↻ Retry',
     mainMenuBtn: '🏠 Return to Main Menu',
@@ -342,6 +356,8 @@ export const en = {
     vectorSection: '🔍 Resolution-Independent Vector Zoom (0.20x – 20.0x)',
     vectorHint:
       '🖱️ Wheel / 2-finger pinch zoom (0.20x ~ 20.0x) · Drag to pan & inspect sliced vectors with zero pixelation!',
+    vectorTouchHint:
+      '🤏 2-finger pinch zoom (0.20x ~ 20.0x) · Drag to pan & inspect sliced vectors with zero pixelation!',
     resetView: '↺ Reset 1.0x',
     hidePanel: '👁️ Canvas Only',
     showPanel: '🎛️ Show Pause Menu',
@@ -364,7 +380,14 @@ export const en = {
     beatRushFinish: '💥 RUSH FINISHER ({hits} HITS) — +{bonus} BONUS!',
     cleanDodge: '✨ CLEAN LANE DODGE! +{bonus}',
     hazardHit: '⚠️ HAZARD HIT — MISS (COMBO RESET)',
+    holdBreak: '⚠️ HOLD RELEASED EARLY — COMBO BROKEN!',
   } satisfies Record<BannerKey, string>,
+  bannerTouch: {
+    ready: 'READY — TAP ▲ 2F HIGH · TAP ▼ 1F LOW · CROSS ⚡ DUAL · TAP OVERDRIVE',
+    overdriveReady: '⚡ RESONANCE 100% READY — TAP OVERDRIVE!',
+    grooveDanger: '⚠️ GROOVE CRITICAL — Slash PERFECTs or tap Overdrive to heal!',
+    beatRushStart: '⚡ BEAT RUSH LOCK-ON — RAPID TAP HIGH / LOW / CROSS!',
+  } satisfies Partial<Record<BannerKey, string>>,
   result: {
     badge: 'TRACK COMPLETE · RHYTHM SLASHER CLEARED',
     newRecord: '🏆 NEW PERSONAL BEST! (+{delta})',
@@ -376,6 +399,13 @@ export const en = {
     accuracy: 'ACCURACY',
     accuracyValue: '{value}%',
     judgmentBreakdown: 'PERFECT {perfect} · GREAT {great} · GOOD {good} · MISS {miss}',
+    criticalStat: '⚡ CRIT {count}',
+    fastSlowStat: 'FAST {fast} · SLOW {slow}',
+    meanDeltaStat: 'AVG {value}',
+    syncHintLate: '🎧 Sync Tip: Offset +{ms}ms in Pause [Esc]',
+    syncHintEarly: '🎧 Sync Tip: Offset -{ms}ms in Pause [Esc]',
+    syncHintLateTouch: '🎧 Sync Tip: Pause → Offset +{ms}ms',
+    syncHintEarlyTouch: '🎧 Sync Tip: Pause → Offset -{ms}ms',
     finalScore: 'FINAL SCORE',
     maxCombo: 'MAX COMBO',
     orbs: 'Targets Slashed',
@@ -393,6 +423,7 @@ export const en = {
     failedBadge: 'GROOVE DEPLETED · STAGE FAILED',
     failedProgress: 'REACHED {pct}% OF TRACK',
     instantRetry: '↻ Instant Retry [Space]',
+    instantRetryTouch: '↻ Instant Retry',
   },
   guide: {
     badge: 'QUICK PLAY GUIDE',
@@ -419,6 +450,8 @@ export const en = {
         chipChordTouch: 'DUAL [2-Finger / CROSS]',
         chipHold: 'HOLD [Keep Pressed]',
         desc: 'Cleave linked Gold Twin Cores exclusively with [Space / F+J], and hold single-lane ribbons until their tail ends.',
+        descTouch:
+          'Cleave linked Gold Twin Cores exclusively with a 2-finger tap or CROSS pad, and hold single-lane ribbons until their tail ends.',
       },
       dodge: {
         step: 'STEP 03',
@@ -447,6 +480,7 @@ export const en = {
       casualSub: 'NO-FAIL HP',
       overdrive: '⚡ OVERDRIVE 2X · HEAL',
       zoom: 'ESC · 20x ZOOM',
+      zoomTouch: 'PINCH · 20x ZOOM',
     },
   },
 };
@@ -505,6 +539,8 @@ export const ko: Messages = {
     videoBgTipTitle: 'MP4 · WebM 영상 배경 전환',
     videoBgTipBody:
       '업로드한 영상 파일을 ThorVG 2D 벡터 스테이지 뒷배경에서 음악에 맞춰 재생합니다. 인게임 [V] 키로도 즉시 전환됩니다.',
+    videoBgTipTouchBody:
+      '업로드한 영상 파일을 ThorVG 2D 벡터 스테이지 뒷배경에서 음악에 맞춰 재생합니다. 인게임 영상 버튼으로도 즉시 전환됩니다.',
     previewPlayBtn: '♪ 미리듣기',
     previewStopBtn: '■ 정지',
     previewTipTitle: '하이라이트 미리듣기',
@@ -606,6 +642,8 @@ export const ko: Messages = {
     tipTitle: '⚔️ 2-LANE 비트 슬래셔 핵심 플레이 팁',
     tipBody:
       '듀얼 레티클에서 상단[F/↑/클릭·상단 탭](톱날 회피)과 하단[J/↓/우클릭·하단 탭](기뢰 회피)으로 코어를 베세요! 골드 코어는 [Space/CROSS] 동시 발도, 100% 충전 시 [Shift/버튼] 오버드라이브!',
+    tipTouchBody:
+      '듀얼 레티클에서 상단 탭(톱날 회피)과 하단 탭(기뢰 회피)으로 코어를 베세요! 골드 코어는 양손 탭·CROSS 동시 발도, 100% 충전 시 오버드라이브 버튼을 탭하세요!',
   },
   upload: {
     dropzone: '내 음원 · MP4 추가',
@@ -713,6 +751,9 @@ export const ko: Messages = {
     sfxFull: '🔊 효과음: 전체 [M]',
     sfxImpact: '🥁 효과음: 임팩트만 [M]',
     sfxOff: '🔇 효과음: 끔 [M]',
+    sfxFullTouch: '🔊 효과음: 전체',
+    sfxImpactTouch: '🥁 효과음: 임팩트만',
+    sfxOffTouch: '🔇 효과음: 끔',
     stars: '★ {collected}/{total}',
     noMissLive: '👑 노미스',
     fastMs: 'FAST -{ms}ms',
@@ -728,14 +769,20 @@ export const ko: Messages = {
     zoomReset: '1x',
     zoomInTitle: '확대 (+ / 마우스 휠)',
     zoomOutTitle: '축소 (- / 마우스 휠)',
+    zoomInTitleTouch: '확대 (+ / 핀치 줌)',
+    zoomOutTitleTouch: '축소 (- / 핀치 줌)',
     cinematicAuto: '🎬 자동 [C]',
     cinematicFixed: '🎬 고정 [C]',
+    cinematicAutoTouch: '🎬 자동',
+    cinematicFixedTouch: '🎬 고정',
     cinematicTitle: '구간 연동 다이나믹 벡터 시네마틱 카메라 전환 [C]',
+    cinematicTitleTouch: '구간 연동 다이나믹 벡터 시네마틱 카메라 전환',
     videoBgOn: '🎬 영상 [V]',
     videoBgOff: '🌌 기본 [V]',
     videoBgOnTouch: '🎬 영상',
     videoBgOffTouch: '🌌 기본',
     videoBgTitle: 'MP4 영상 배경과 기본 벡터 배경 전환 [V]',
+    videoBgTitleTouch: 'MP4 영상 배경과 기본 벡터 배경 전환',
     grooveHp: '그루브 HP {hp}%',
     grooveDangerTag: '위험',
     chillNoFail: '🛡️ 캐주얼 무실패 모드 · 체력 차감 없음',
@@ -758,6 +805,7 @@ export const ko: Messages = {
     badge: '⏸ 일시정지 · THORVG 벡터 맵 뷰어',
     title: '일시정지',
     resumeBtn: '▶ 게임 돌아가기 [Esc]',
+    resumeTouchBtn: '▶ 게임 돌아가기',
     retryBtn: '↻ 다시 시작 [R]',
     retryTouchBtn: '↻ 다시 시작',
     mainMenuBtn: '🏠 메인화면 돌아가기',
@@ -773,6 +821,8 @@ export const ko: Messages = {
     vectorSection: '🔍 해상도 독립 2D 벡터 맵 확대·축소 (0.20x ~ 20.0x)',
     vectorHint:
       '🖱️ 휠 / 두 손가락 핀치 줌(0.20x ~ 20.0x) · 드래그 이동으로 벡터 절단면을 20배 무손실 감상!',
+    vectorTouchHint:
+      '🤏 두 손가락 핀치 줌(0.20x ~ 20.0x) · 드래그 이동으로 벡터 절단면을 20배 무손실 감상!',
     resetView: '↺ 1.0x 위치 초기화',
     hidePanel: '👁️ 맵만 보기',
     showPanel: '🎛️ 일시정지 메뉴 펼치기',
@@ -795,7 +845,14 @@ export const ko: Messages = {
     beatRushFinish: '💥 러시 피니시 ({hits}연참) — +{bonus} 보너스!',
     cleanDodge: '✨ 완벽한 레인 회피! +{bonus}',
     hazardHit: '⚠️ 기뢰·톱날 피격 — MISS (콤보 초기화)',
+    holdBreak: '⚠️ 롱노트 조기 해제 — 콤보 초기화!',
   } satisfies Record<BannerKey, string>,
+  bannerTouch: {
+    ready: '전투 준비 — 상단 ▲ 2층 · 하단 ▼ 1층 · 동시 ⚡ 크로스 · 오버드라이브 탭',
+    overdriveReady: '⚡ 공명 게이지 100% 충전 — 오버드라이브 버튼을 탭하세요!',
+    grooveDanger: '⚠️ 그루브 위험! PERFECT 참격 또는 오버드라이브 탭으로 회복하세요!',
+    beatRushStart: '⚡ 비트 러시 락온 — 상단 · 하단 · 동시 패드를 연타하세요!',
+  } satisfies Partial<Record<BannerKey, string>>,
   result: {
     badge: '트랙 완주 · 비트 슬래셔 스테이지 클리어',
     newRecord: '🏆 최고 기록 경신! (+{delta})',
@@ -807,6 +864,13 @@ export const ko: Messages = {
     accuracy: '리듬 정확도',
     accuracyValue: '{value}%',
     judgmentBreakdown: 'PERFECT {perfect} · GREAT {great} · GOOD {good} · MISS {miss}',
+    criticalStat: '⚡ 크리티컬 {count}',
+    fastSlowStat: 'FAST {fast} · SLOW {slow}',
+    meanDeltaStat: '평균 {value}',
+    syncHintLate: '🎧 싱크 팁: 일시정지 [Esc] 오프셋 +{ms}ms 권장',
+    syncHintEarly: '🎧 싱크 팁: 일시정지 [Esc] 오프셋 -{ms}ms 권장',
+    syncHintLateTouch: '🎧 싱크 팁: 일시정지 → 오프셋 +{ms}ms 권장',
+    syncHintEarlyTouch: '🎧 싱크 팁: 일시정지 → 오프셋 -{ms}ms 권장',
     finalScore: '최종 점수',
     maxCombo: '최대 콤보',
     orbs: '베어낸 타겟',
@@ -824,6 +888,7 @@ export const ko: Messages = {
     failedBadge: '그루브 소진 · 스테이지 실패',
     failedProgress: '곡 진행률 {pct}% 도달',
     instantRetry: '↻ 즉시 재도전 [Space]',
+    instantRetryTouch: '↻ 즉시 재도전',
   },
   guide: {
     badge: '초보자 퀵 플레이 가이드',
@@ -850,6 +915,8 @@ export const ko: Messages = {
         chipChordTouch: '동시 [양손 탭 / CROSS ⚡]',
         chipHold: '롱노트 [끝까지 누르기]',
         desc: '연결된 황금 동시 코어는 [Space / F+J] 전용이며, 긴 리본 노트는 꼬리가 끝날 때까지 누르고 계세요.',
+        descTouch:
+          '연결된 황금 동시 코어는 양손 탭 또는 CROSS ⚡ 패드 전용이며, 긴 리본 노트는 꼬리가 끝날 때까지 누르고 계세요.',
       },
       dodge: {
         step: '3단계',
@@ -878,6 +945,7 @@ export const ko: Messages = {
       casualSub: '무실패 HP',
       overdrive: '⚡ 각성 2X · 회복',
       zoom: 'ESC · 20x 줌',
+      zoomTouch: '핀치 · 20x 줌',
     },
   },
 };

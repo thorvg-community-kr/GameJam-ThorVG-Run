@@ -32,7 +32,8 @@ export type BannerKey =
   | 'beatRushStart'
   | 'beatRushFinish'
   | 'cleanDodge'
-  | 'hazardHit';
+  | 'hazardHit'
+  | 'holdBreak';
 
 export type CrewmateSkinId = 'classic' | 'prism' | 'flawless' | 'grandmaster';
 
@@ -217,6 +218,8 @@ export interface BeatTarget {
   holdActive?: boolean;
   holdNextTickSec?: number;
   holdReleaseGraceSec?: number;
+  holdHeadCritical?: boolean;
+  holdBroken?: boolean;
   chordPartialLane?: SlashLane;
   chordPartialSec?: number;
   chordPartialSignedMs?: number;
@@ -255,6 +258,14 @@ export interface JudgmentCounts {
   great: number;
   good: number;
   miss: number;
+}
+
+export interface JudgmentTelemetry {
+  criticalCount: number;
+  fastCount: number;
+  slowCount: number;
+  timedHitCount: number;
+  meanSignedDeltaMs: number;
 }
 
 export interface TrackBlueprint {
@@ -408,6 +419,8 @@ export interface HUDTelemetry {
   rank?: ResultRank;
   judgment?: JudgmentFeedback | null;
   judgmentCounts?: JudgmentCounts;
+  judgmentTelemetry?: JudgmentTelemetry;
+  holdBreaks?: number;
   gimmicksTriggered?: number;
   isNewRecord?: boolean;
   scoreDelta?: number;

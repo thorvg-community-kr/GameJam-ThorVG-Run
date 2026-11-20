@@ -1,4 +1,4 @@
-import type { Shape as TvgShape } from '@thorvg/webcanvas';
+import { constants, type Shape as TvgShape } from '@thorvg/webcanvas';
 import {
   FORM_CONFIG,
   type CrewmateSkinId,
@@ -470,20 +470,35 @@ export function drawCrewmateSkinOrnaments(params: CrewmateSkinOrnamentParams): v
       .close();
   };
 
+  const roundCap = constants.StrokeCap.Round;
+  const roundJoin = constants.StrokeJoin.Round;
+
   if (skinId === 'classic') {
     playerGlowShape
       .fill(ar, ag, ab, clampAlpha(overdriveActive ? 95 : 68))
       .stroke({
         width: sw(overdriveActive ? 2.8 : 2.0),
         color: [ar, ag, ab, clampAlpha(215)],
+        cap: roundCap,
+        join: roundJoin,
       });
     appendKatanaStanceBlade();
     skinFrontShape
       .fill(226, 246, 255, clampAlpha(240))
-      .stroke({ width: sw(1.65), color: [255, 255, 255, clampAlpha(252)] });
+      .stroke({
+        width: sw(1.65),
+        color: [255, 255, 255, clampAlpha(252)],
+        cap: roundCap,
+        join: roundJoin,
+      });
     skinFrontGlowShape
       .fill(ar, ag, ab, clampAlpha(205))
-      .stroke({ width: sw(1.25), color: [255, 255, 255, clampAlpha(225)] });
+      .stroke({
+        width: sw(1.25),
+        color: [255, 255, 255, clampAlpha(225)],
+        cap: roundCap,
+        join: roundJoin,
+      });
     return;
   }
 
@@ -612,6 +627,8 @@ export function drawCrewmateSkinOrnaments(params: CrewmateSkinOrnamentParams): v
       .stroke({
         width: sw(overdriveActive ? 2.8 : 2.0),
         color: [ar, ag, ab, clampAlpha(218)],
+        cap: roundCap,
+        join: roundJoin,
       });
 
     // 3 swept Bezier Valkyrie wing feathers on `playerCoreShape`
@@ -647,7 +664,12 @@ export function drawCrewmateSkinOrnaments(params: CrewmateSkinOrnamentParams): v
     );
     playerCoreShape
       .fill(56, 189, 248, clampAlpha(238))
-      .stroke({ width: sw(2.1), color: [255, 246, 190, clampAlpha(252)] });
+      .stroke({
+        width: sw(2.1),
+        color: [255, 246, 190, clampAlpha(252)],
+        cap: roundCap,
+        join: roundJoin,
+      });
 
     // Front: 3-spire crystalline Prism Tiara (`ly = -1.24` base up to `ly = -1.88` central peak)
     skinFrontShape
@@ -672,7 +694,12 @@ export function drawCrewmateSkinOrnaments(params: CrewmateSkinOrnamentParams): v
     appendKatanaStanceBlade();
     skinFrontShape
       .fill(56, 189, 248, clampAlpha(244))
-      .stroke({ width: sw(1.95), color: [236, 252, 255, clampAlpha(255)] });
+      .stroke({
+        width: sw(1.95),
+        color: [236, 252, 255, clampAlpha(255)],
+        cap: roundCap,
+        join: roundJoin,
+      });
 
     // Glowing Gold Center Gem + Crystal Apex Starburst
     const gemPulse = 1 + 0.08 * Math.sin(timeSec * 6.5);
@@ -695,7 +722,12 @@ export function drawCrewmateSkinOrnaments(params: CrewmateSkinOrnamentParams): v
     );
     skinFrontGlowShape
       .fill(255, 228, 42, clampAlpha(238))
-      .stroke({ width: sw(1.35), color: [255, 250, 205, clampAlpha(242)] });
+      .stroke({
+        width: sw(1.35),
+        color: [255, 250, 205, clampAlpha(242)],
+        cap: roundCap,
+        join: roundJoin,
+      });
     return;
   }
 
@@ -719,6 +751,8 @@ export function drawCrewmateSkinOrnaments(params: CrewmateSkinOrnamentParams): v
       .stroke({
         width: sw(overdriveActive ? 2.8 : 2.0),
         color: [ar, ag, ab, clampAlpha(218)],
+        cap: roundCap,
+        join: roundJoin,
       });
 
     // Upper & Lower Hex-Thruster Wing Blades + Central Stabilizer on `playerCoreShape`
@@ -746,7 +780,12 @@ export function drawCrewmateSkinOrnaments(params: CrewmateSkinOrnamentParams): v
     ]);
     playerCoreShape
       .fill(52, 211, 153, clampAlpha(238))
-      .stroke({ width: sw(2.05), color: [218, 255, 246, clampAlpha(252)] });
+      .stroke({
+        width: sw(2.05),
+        color: [218, 255, 246, clampAlpha(252)],
+        cap: roundCap,
+        join: roundJoin,
+      });
 
     // Front: Tilted hollow 3D Cyber Emerald Halo Ring (`ly = -1.56`) + V-shaped tactical visor crest
     const haloTilt = -0.11 + Math.sin(timeSec * 4.0) * 0.035;
@@ -765,7 +804,12 @@ export function drawCrewmateSkinOrnaments(params: CrewmateSkinOrnamentParams): v
     appendKatanaStanceBlade();
     skinFrontShape
       .fill(52, 211, 153, clampAlpha(242))
-      .stroke({ width: sw(1.85), color: [232, 255, 250, clampAlpha(255)] });
+      .stroke({
+        width: sw(1.85),
+        color: [232, 255, 250, clampAlpha(255)],
+        cap: roundCap,
+        join: roundJoin,
+      });
 
     // Additive emerald-cyan plasma exhaust jets (in unobstructed `lx < -1.20` back-space) + halo bloom
     appendLocalTiltedEllipse(skinFrontGlowShape, -0.03, -1.56, 0.80, 0.22, haloTilt, true);
@@ -783,7 +827,12 @@ export function drawCrewmateSkinOrnaments(params: CrewmateSkinOrnamentParams): v
     appendLocalDiamond(skinFrontGlowShape, 0.42, -0.48, 0.09, 0.09, true);
     skinFrontGlowShape
       .fill(52, 211, 153, clampAlpha(185))
-      .stroke({ width: sw(1.45), color: [165, 255, 235, clampAlpha(225)] });
+      .stroke({
+        width: sw(1.45),
+        color: [165, 255, 235, clampAlpha(225)],
+        cap: roundCap,
+        join: roundJoin,
+      });
     return;
   }
 
@@ -807,6 +856,8 @@ export function drawCrewmateSkinOrnaments(params: CrewmateSkinOrnamentParams): v
     .stroke({
       width: sw(overdriveActive ? 2.9 : 2.15),
       color: [ar, ag, ab, clampAlpha(225)],
+      cap: roundCap,
+      join: roundJoin,
     });
 
   // 5-Ray Curved Cubic-Bezier Solar Sovereign Wing-Mantle on `playerCoreShape`
@@ -862,7 +913,12 @@ export function drawCrewmateSkinOrnaments(params: CrewmateSkinOrnamentParams): v
   );
   playerCoreShape
     .fill(255, 215, 0, clampAlpha(244))
-    .stroke({ width: sw(2.2), color: [255, 240, 218, clampAlpha(255)] });
+    .stroke({
+      width: sw(2.2),
+      color: [255, 240, 218, clampAlpha(255)],
+      cap: roundCap,
+      join: roundJoin,
+    });
 
   // Front: 5-Spire Imperial Golden Crown (`ly = -1.24` band up to `ly = -1.96` central sovereign spire)
   skinFrontShape
@@ -942,11 +998,21 @@ export function drawCrewmateSkinOrnaments(params: CrewmateSkinOrnamentParams): v
 
   skinFrontShape
     .fill(255, 224, 32, clampAlpha(248))
-    .stroke({ width: sw(2.0), color: [255, 252, 220, clampAlpha(255)] });
+    .stroke({
+      width: sw(2.0),
+      color: [255, 252, 220, clampAlpha(255)],
+      cap: roundCap,
+      join: roundJoin,
+    });
 
   skinFrontGlowShape
     .fill(255, 38, 98, clampAlpha(236))
-    .stroke({ width: sw(1.35), color: [255, 190, 212, clampAlpha(232)] });
+    .stroke({
+      width: sw(1.35),
+      color: [255, 190, 212, clampAlpha(232)],
+      cap: roundCap,
+      join: roundJoin,
+    });
 }
 
 /**
@@ -969,6 +1035,8 @@ export function drawPlayerPolygon(
 ): void {
   const [r, g, b] = overdriveActive ? [255, 232, 85] : FORM_CONFIG[form].rgb;
   const alpha = Math.floor(255 * alphaRatio);
+  const roundCap = constants.StrokeCap.Round;
+  const roundJoin = constants.StrokeJoin.Round;
 
   playerGlowShape.reset().fill(0, 0, 0, 0);
   playerCoreShape.reset().fill(0, 0, 0, 0);
@@ -981,6 +1049,8 @@ export function drawPlayerPolygon(
       .stroke({
         width: overdriveActive ? 2.8 : 2,
         color: [r, g, b, Math.floor(215 * alphaRatio)],
+        cap: roundCap,
+        join: roundJoin,
       });
     return;
   }
@@ -989,10 +1059,20 @@ export function drawPlayerPolygon(
   appendSacredComboHalo(playerGlowShape, cx, cy, radius, combo, timeSec, overdriveActive);
   playerGlowShape
     .fill(r, g, b, Math.floor(90 * alphaRatio))
-    .stroke({ width: 1.8, color: [r, g, b, Math.floor(190 * alphaRatio)] });
+    .stroke({
+      width: 1.8,
+      color: [r, g, b, Math.floor(190 * alphaRatio)],
+      cap: roundCap,
+      join: roundJoin,
+    });
 
   appendPolygonPath(playerCoreShape, cx, cy, radius, rotation, form);
   playerCoreShape
     .fill(r, g, b, alpha)
-    .stroke({ width: 2.5, color: [255, 255, 255, alpha] });
+    .stroke({
+      width: 2.5,
+      color: [255, 255, 255, alpha],
+      cap: roundCap,
+      join: roundJoin,
+    });
 }

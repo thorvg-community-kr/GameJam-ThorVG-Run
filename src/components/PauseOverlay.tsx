@@ -67,6 +67,7 @@ export const PauseOverlay: React.FC<PauseOverlayProps> = ({
   const { t } = useI18n();
   const isCoarsePointer = useCoarsePointer();
   const ctrlGuide = isCoarsePointer ? t.menu.controlsTouch : t.menu.controls;
+  const resumeLabel = isCoarsePointer ? t.pause.resumeTouchBtn : t.pause.resumeBtn;
   const retryLabel = isCoarsePointer ? t.pause.retryTouchBtn : t.pause.retryBtn;
   const pillVideoLabel = isCoarsePointer
     ? videoBgEnabled
@@ -108,7 +109,7 @@ export const PauseOverlay: React.FC<PauseOverlayProps> = ({
               type="button"
               data-testid="pause-pill-video-bg-btn"
               aria-pressed={videoBgEnabled}
-              title={t.hud.videoBgTitle}
+              title={isCoarsePointer ? t.hud.videoBgTitleTouch : t.hud.videoBgTitle}
               className={`hud-btn pause-pill-btn pause-pill-video-btn${videoBgEnabled ? ' active' : ''}`}
               onClick={onToggleVideoBg}
             >
@@ -137,7 +138,7 @@ export const PauseOverlay: React.FC<PauseOverlayProps> = ({
             className="primary-btn pause-pill-resume-btn"
             onClick={onResume}
           >
-            {t.pause.resumeBtn}
+            {resumeLabel}
           </button>
         </div>
       ) : (
@@ -174,7 +175,7 @@ export const PauseOverlay: React.FC<PauseOverlayProps> = ({
               className="primary-btn pause-action-btn"
               onClick={onResume}
             >
-              {t.pause.resumeBtn}
+              {resumeLabel}
             </button>
             <button
               type="button"
@@ -319,7 +320,7 @@ export const PauseOverlay: React.FC<PauseOverlayProps> = ({
                 type="button"
                 data-testid="pause-zoom-out"
                 className="hud-btn pause-step-btn"
-                title={t.hud.zoomOutTitle}
+                title={isCoarsePointer ? t.hud.zoomOutTitleTouch : t.hud.zoomOutTitle}
                 onClick={() => onStepZoom(1 / 1.25)}
               >
                 −
@@ -338,7 +339,7 @@ export const PauseOverlay: React.FC<PauseOverlayProps> = ({
                 type="button"
                 data-testid="pause-zoom-in"
                 className="hud-btn pause-step-btn"
-                title={t.hud.zoomInTitle}
+                title={isCoarsePointer ? t.hud.zoomInTitleTouch : t.hud.zoomInTitle}
                 onClick={() => onStepZoom(1.25)}
               >
                 +
@@ -370,7 +371,9 @@ export const PauseOverlay: React.FC<PauseOverlayProps> = ({
               })}
             </div>
 
-            <p className="pause-vector-hint">{t.pause.vectorHint}</p>
+            <p className="pause-vector-hint">
+              {isCoarsePointer ? t.pause.vectorTouchHint : t.pause.vectorHint}
+            </p>
           </div>
 
           {/* Row 5: 4 Crisp Controls Guide Pills */}

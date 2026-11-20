@@ -86,11 +86,27 @@ function appendSerratedSawblade(
   appendRegularPolygonPath(shape, cx, cy, rad * 0.28, 8, -spin, false);
 }
 
+interface ActiveRushGlowAnchor {
+  cx: number;
+  cy: number;
+  radius: number;
+  locked: boolean;
+}
+
+interface TrimArcCandidate {
+  priority: 1 | 2 | 3;
+  progress: number;
+  strokeWidth: number;
+  color: readonly [number, number, number, number];
+  circles: ReadonlyArray<readonly [number, number, number]>;
+}
+
 /**
- * Stateless 2-Lane Rhythm Slasher World Render Pass (`rhythm-slasher-v6`):
- * - Continuous 1F Bezier neon stage deck + equalizer spectrum + sleek semi-transparent 2F Cyan sky rail
+ * Stateless 2-Lane Rhythm Slasher World Render Pass (`rhythm-slasher-v6` + ThorVG v1.1.3 Showcase):
+ * - Continuous 1F Bezier neon stage deck (`LinearGradient`) + equalizer spectrum + 2F Cyan sky rail & scrolling `dash` telemetry
+ * - `RadialGradient` boss/overdrive plasma aura (`coreGlow`) & `Shape.trimPath` progressive circular gauges (`trimArcs`)
  * - Fixed Dual Neon Target Reticles (`HIGH` Cyan `#05D5FF`, `LOW` Crimson `#FF2A6D`) + beat-sync plasma beam
- * - 5 Active Beat Enemy Archetypes (`'high'`, `'low'`, `'chord'`, `'hold'`, `'rush'`) + Approach Telegraph Rings
+ * - 5 Active Beat Enemy Archetypes (`'high'`, `'low'`, `'chord'`, `'hold'` [with `holdBroken` severed flicker], `'rush'`)
  * - 2 Active-Dodge Hazards (`'sawblade'` 1F, `'mine'` 2F) + Golden 8-Point `★ Prism Star` Halos
  */
 export function renderMacroWorldPass(
@@ -113,6 +129,8 @@ export function renderMacroWorldPass(
     frequency.isBeat ? 0.85 : 0,
     frequency.low * 0.55
   );
+  const roundCap = shapes.tvg.StrokeCap.Round;
+  const roundJoin = shapes.tvg.StrokeJoin.Round;
   const tw = (w: number) => Math.max(0.75, Math.min(w * 14, ts(w)));
   const cullPad = Math.max(96, ts(115));
 
@@ -140,10 +158,8 @@ export function renderMacroWorldPass(
     visMaxWx = visibleSegments[visibleSegments.length - 1]!.x1 + 160;
   }
 
-  // 0. Sleek 2F Cyan Sky Rail Guide Line + Beat-Reactive Pulse Ticks + Horizon Aurora (`shapes.aurora`)
+  // 0. Sleek 2F Cyan Sky Rail (`shapes.aurora`) + Scrolling Dash Telemetry Rail & Horizon Aurora (`shapes.skyDash`)
   shapes.aurora.moveTo(0, yHigh).lineTo(width, yHigh);
-  const secondaryRailOffset = ts(4.5);
-  shapes.aurora.moveTo(reticleX, yHigh + secondaryRailOffset).lineTo(width, yHigh + secondaryRailOffset);
 
   const railTickStep = 136;
   const firstTickWx = Math.floor(visMinWx / railTickStep) * railTickStep;
@@ -155,6 +171,11 @@ export function renderMacroWorldPass(
     shapes.aurora.moveTo(sx, yHigh - tickHalfH).lineTo(sx, yHigh + tickHalfH);
   }
 
+  const secondaryRailOffset = ts(5.5);
+  shapes.skyDash
+    .moveTo(reticleX, yHigh + secondaryRailOffset)
+    .lineTo(width, yHigh + secondaryRailOffset);
+
   if (isDrop || isOverdrive || combo >= 25) {
     const steps = 12;
     const stepW = width / steps;
@@ -162,30 +183,51 @@ export function renderMacroWorldPass(
     const baseY1 = height * 0.16;
     const baseY2 = height * 0.23;
 
-    shapes.aurora.moveTo(0, baseY1);
+    shapes.skyDash.moveTo(0, baseY1);
     for (let i = 1; i <= steps; i++) {
       const x = i * stepW;
       const y = baseY1 + Math.sin(state.timeSec * 3.4 + i * 0.7) * amp + frequency.mid * 14;
-      shapes.aurora.lineTo(x, y);
+      shapes.skyDash.lineTo(x, y);
     }
-    shapes.aurora.moveTo(0, baseY2);
+    shapes.skyDash.moveTo(0, baseY2);
     for (let i = 1; i <= steps; i++) {
       const x = i * stepW;
       const y = baseY2 + Math.cos(state.timeSec * 2.7 + i * 0.65) * (amp * 0.8) - frequency.high * 12;
-      shapes.aurora.lineTo(x, y);
+      shapes.skyDash.lineTo(x, y);
     }
   }
 
-  const skyRailAlpha = Math.min(185, Math.round((isOverdrive ? 125 : isDrop ? 105 : 82) + beatEnergy * 42));
+  const skyRailAlpha = Math.min(
+    185,
+    Math.round((isOverdrive ? 125 : isDrop ? 105 : 82) + beatEnergy * 42)
+  );
   const skyRailColor: [number, number, number] = isOverdrive ? [140, 242, 255] : [5, 213, 255];
   shapes.aurora
     .fill(0, 0, 0, 0)
     .stroke({
       width: tw(isOverdrive || isDrop ? 2.4 : 1.9),
       color: [skyRailColor[0], skyRailColor[1], skyRailColor[2], skyRailAlpha],
+      cap: roundCap,
+      join: roundJoin,
     });
 
-  // 1. Continuous 1F Cubic-Bezier Neon Stage Deck + Equalizer Spectrum + 1F Lane Ticks
+  const dashLen = Math.max(5, ts(18));
+  const gapLen = Math.max(4, ts(11));
+  const dashPeriod = dashLen + gapLen;
+  const dashOffset =
+    (((cameraX * Math.min(state.zoomScale, 48)) % dashPeriod) + dashPeriod) % dashPeriod;
+  shapes.skyDash
+    .fill(0, 0, 0, 0)
+    .stroke({
+      width: tw(isOverdrive || isDrop ? 2.0 : 1.6),
+      color: [skyRailColor[0], skyRailColor[1], skyRailColor[2], Math.round(skyRailAlpha * 0.85)],
+      cap: roundCap,
+      join: roundJoin,
+      dash: [dashLen, gapLen],
+      dashOffset,
+    });
+
+  // 1. Continuous 1F Cubic-Bezier Neon Stage Deck (`LinearGradient`) + Equalizer Spectrum
   if (visibleSegments.length > 0) {
     const bottomY = Math.max(height + 40, ty(height + 160));
     const first = visibleSegments[0]!;
@@ -260,27 +302,62 @@ export function renderMacroWorldPass(
     const deckG = isOverdrive ? 225 : Math.round(fg * 0.55 + 42 * 0.45);
     const deckB = isOverdrive ? 85 : Math.round(fb * 0.55 + 109 * 0.45);
 
-    shapes.waveFill.fill(fr, fg, fb, fillAlpha).stroke({ width: 0, color: [0, 0, 0, 0] });
+    // One-shot LinearGradient ownership transfer to `shapes.waveFill`
+    const deckTopY = startY;
+    const deckGradEndY = Math.max(
+      deckTopY + 12,
+      Math.min(bottomY, startY + Math.max(90, ts(180)))
+    );
+    const deckGrad = new shapes.tvg.LinearGradient(0, deckTopY, 0, deckGradEndY);
+    deckGrad.setStops(
+      [0, [deckR, deckG, deckB, Math.min(132, Math.round(fillAlpha * 1.8))]],
+      [0.45, [fr, fg, fb, fillAlpha]],
+      [
+        1,
+        [
+          Math.round(fr * 0.3),
+          Math.round(fg * 0.3),
+          Math.round(fb * 0.45),
+          state.videoBackgroundActive ? 10 : 6,
+        ],
+      ]
+    );
+    shapes.waveFill.fill(deckGrad).stroke({ width: 0, color: [0, 0, 0, 0] });
+
     if (hasSpectrum) {
       shapes.spectrum
         .fill(fr, fg, fb, isDrop || isOverdrive ? 86 : 50)
-        .stroke({ width: tw(1.2), color: [sr, sg, sb, 115] });
+        .stroke({ width: tw(1.2), color: [sr, sg, sb, 115], cap: roundCap, join: roundJoin });
     }
     shapes.waveGlow
       .fill(0, 0, 0, 0)
-      .stroke({ width: glowWidth, color: [deckR, deckG, deckB, glowAlpha] });
+      .stroke({
+        width: glowWidth,
+        color: [deckR, deckG, deckB, glowAlpha],
+        cap: roundCap,
+        join: roundJoin,
+      });
     shapes.waveCore
       .fill(0, 0, 0, 0)
-      .stroke({ width: tw(3.2), color: [255, 255, 255, 245] });
+      .stroke({
+        width: tw(3.2),
+        color: [255, 255, 255, 245],
+        cap: roundCap,
+        join: roundJoin,
+      });
   }
 
-  let hasBass = false;    // Crimson #FF2A6D (`LOW` lane core & reticle ring)
-  let hasSynth = false;   // Cyan #05D5FF (`HIGH` lane core & reticle ring)
-  let hasTreble = false;  // Gold #FFE600 (`CHORD` / `RUSH` shield core)
+  let hasBass = false;      // Crimson #FF2A6D (`LOW` lane core & reticle ring)
+  let hasSynth = false;     // Cyan #05D5FF (`HIGH` lane core & reticle ring)
+  let hasTreble = false;    // Gold #FFE600 (`CHORD` / `RUSH` shield core)
   let hasWhiteCore = false; // `shapes.gimmicks`: Blazing white inner cores & laser beams
   let hasPrismStars = false;
   let hasTimingRings = false;
   let hasTraps = false;
+
+  let activeRushGlow: ActiveRushGlowAnchor | null = null;
+  let bestTrimCandidate: TrimArcCandidate | null = null;
+  let bestApproachDt = Infinity;
 
   // 2. Fixed Dual Neon Target Reticles (`shapes.bandSynth`, `shapes.bandBass`, `shapes.reticles`)
   const pulseHigh = Math.max(0, state.reticlePulseHigh);
@@ -356,7 +433,12 @@ export function renderMacroWorldPass(
     .moveTo(reticleX + bSpread - bArm, activeY - bArm)
     .lineTo(reticleX + bSpread, activeY)
     .lineTo(reticleX + bSpread - bArm, activeY + bArm);
-  shapes.gimmicks.appendCircle(reticleX, activeY, Math.max(1.8, activeR * 0.14), Math.max(1.8, activeR * 0.14));
+  shapes.gimmicks.appendCircle(
+    reticleX,
+    activeY,
+    Math.max(1.8, activeR * 0.14),
+    Math.max(1.8, activeR * 0.14)
+  );
   hasWhiteCore = true;
 
   // Vertical plasma sync beam connecting High & Low reticles on beat pulse
@@ -391,10 +473,11 @@ export function renderMacroWorldPass(
     }
 
     const baseScreenY = ty(target.screenY ?? target.worldY);
-    const pulse = 1 + Math.sin(state.timeSec * 8.5 + target.id * 0.65) * (isOverdrive ? 0.14 : 0.09);
+    const pulse =
+      1 + Math.sin(state.timeSec * 8.5 + target.id * 0.65) * (isOverdrive ? 0.14 : 0.09);
     const rad = Math.max(2.5, ts(target.radius * pulse));
 
-    // Approach Telegraph Ring: within 0.28s of `reticleScreenX` on unhit slash targets
+    // Approach Telegraph Ring (`timingRings`) + Priority-3 `trimPath` Sweep Candidate (`0 <= dtBeat <= 0.28`)
     const isSlashTarget =
       target.kind === 'high' ||
       target.kind === 'low' ||
@@ -419,6 +502,35 @@ export function renderMacroWorldPass(
           shapes.timingRings.appendCircle(headSx, baseScreenY, ringR, ringR);
         }
         hasTimingRings = true;
+
+        if (
+          dtBeat >= 0 &&
+          dtBeat < bestApproachDt &&
+          (bestTrimCandidate === null || bestTrimCandidate.priority === 3)
+        ) {
+          bestApproachDt = dtBeat;
+          const sweep = Math.max(0.08, Math.min(1, 1 - dtBeat / 0.28));
+          const arcR = Math.max(4, ts(target.radius * 1.62));
+          const arcColor: readonly [number, number, number, number] =
+            target.kind === 'chord' || target.kind === 'rush'
+              ? [255, 234, 80, 238]
+              : target.kind === 'high' || (target.kind === 'hold' && target.lane === 'high')
+                ? [80, 236, 255, 238]
+                : [255, 92, 148, 238];
+          bestTrimCandidate = {
+            priority: 3,
+            progress: sweep,
+            strokeWidth: 2.6,
+            color: arcColor,
+            circles:
+              target.kind === 'chord'
+                ? [
+                    [headSx, yHigh, arcR],
+                    [headSx, yLow, arcR],
+                  ]
+                : [[headSx, baseScreenY, arcR]],
+          };
+        }
       }
     }
 
@@ -568,18 +680,60 @@ export function renderMacroWorldPass(
       const holdY = target.lane === 'high' ? yHigh : yLow;
 
       if (target.resolved) {
-        // Released early or completed: dim ghost outline if tail hasn't passed reticle yet
         const ghostStartX = Math.max(rawHeadX, reticleX);
         if (tailX > ghostStartX + ts(8)) {
-          const ghostH = Math.max(2, ts(8));
-          shapes.timingRings.appendRect(
-            ghostStartX,
-            holdY - ghostH * 0.5,
-            tailX - ghostStartX,
-            ghostH,
-            { rx: ghostH * 0.5, ry: ghostH * 0.5 }
-          );
-          hasTimingRings = true;
+          if (target.holdBroken) {
+            // Early-released broken ribbon: severed crimson flickering conduit segments
+            const brokenH = Math.max(3.5, ts(12));
+            const innerBrokenH = brokenH * 0.72;
+            const flickerOn = Math.sin(state.timeSec * 28 + target.id) > -0.25;
+            const span = tailX - ghostStartX;
+
+            shapes.timingRings.appendRect(
+              ghostStartX,
+              holdY - brokenH * 0.45,
+              span,
+              brokenH * 0.9,
+              { rx: brokenH * 0.45, ry: brokenH * 0.45 }
+            );
+            hasTimingRings = true;
+
+            if (flickerOn) {
+              const segLen = Math.max(6, ts(24));
+              const segGap = Math.max(4, ts(13));
+              const segStep = segLen + segGap;
+              for (
+                let sxSeg = ghostStartX, sCount = 0;
+                sxSeg < tailX - ts(2) && sCount < 48;
+                sxSeg += segStep, sCount++
+              ) {
+                const wSeg = Math.min(segLen, tailX - sxSeg);
+                appendRectCW(shapes.traps, sxSeg, holdY - brokenH * 0.5, wSeg, brokenH);
+                appendRectCCW(shapes.traps, sxSeg, holdY - innerBrokenH * 0.5, wSeg, innerBrokenH);
+              }
+              appendHollowPolygonRing(
+                shapes.traps,
+                ghostStartX,
+                holdY,
+                ts(11.0),
+                ts(7.8),
+                6,
+                state.timeSec * 3.0
+              );
+              hasTraps = true;
+            }
+          } else {
+            // Completed hold ribbon tail fade-out ghost
+            const ghostH = Math.max(2, ts(8));
+            shapes.timingRings.appendRect(
+              ghostStartX,
+              holdY - ghostH * 0.5,
+              tailX - ghostStartX,
+              ghostH,
+              { rx: ghostH * 0.5, ry: ghostH * 0.5 }
+            );
+            hasTimingRings = true;
+          }
         }
         continue;
       }
@@ -631,6 +785,25 @@ export function renderMacroWorldPass(
           state.timeSec * 9.5
         );
         shapes.reticles.appendCircle(headX, holdY, headNodeR * 1.65, headNodeR * 1.65);
+
+        // Priority-1 `trimPath` circular completion arc (`0% -> 100%`)
+        const endSec = target.endTimeSec ?? target.timeSec + 0.25;
+        const holdProgress = Math.max(
+          0.04,
+          Math.min(1, (audioSec - target.timeSec) / Math.max(0.05, endSec - target.timeSec))
+        );
+        const holdArcR = Math.max(6, headNodeR * 2.05);
+        bestTrimCandidate = {
+          priority: 1,
+          progress: holdProgress,
+          strokeWidth: 3.4,
+          color: isOverdrive
+            ? [255, 238, 105, 252]
+            : target.lane === 'high'
+              ? [95, 240, 255, 248]
+              : [255, 96, 152, 248],
+          circles: [[headX, holdY, holdArcR]],
+        };
       }
       hasWhiteCore = true;
       continue;
@@ -660,6 +833,15 @@ export function renderMacroWorldPass(
         (1 + Math.sin(state.timeSec * (14 + hitRatio * 26)) * (0.05 + hitRatio * 0.08));
       const bossR = Math.max(6, ts(Math.max(28, target.radius) * frenzy));
       const spin = state.timeSec * (2.8 + hitRatio * 6.8);
+
+      if (activeRushGlow === null || (isLocked && !activeRushGlow.locked)) {
+        activeRushGlow = {
+          cx: rushSx,
+          cy: rushSy,
+          radius: bossR * 2.35,
+          locked: isLocked,
+        };
+      }
 
       // Multi-ring rotating boss core: Gold outer star-shield + Crimson inner hex + Cyan wing ring + White reactor
       appendStarPath(shapes.bandTreble, rushSx, rushSy, bossR * 1.34, bossR * 0.94, 8, spin);
@@ -698,7 +880,12 @@ export function renderMacroWorldPass(
         4,
         -spin * 2.1
       );
-      shapes.gimmicks.appendCircle(rushSx, rushSy, bossR * coreScale * 0.75, bossR * coreScale * 0.75);
+      shapes.gimmicks.appendCircle(
+        rushSx,
+        rushSy,
+        bossR * coreScale * 0.75,
+        bossR * coreScale * 0.75
+      );
       hasWhiteCore = true;
 
       if (isLocked || hitRatio > 0) {
@@ -708,6 +895,16 @@ export function renderMacroWorldPass(
           .lineTo(rushSx, rushSy - bossR * 1.1)
           .moveTo(rushSx, rushSy + bossR * 1.1)
           .lineTo(rushSx, yLow);
+
+        if (bestTrimCandidate === null || bestTrimCandidate.priority > 2) {
+          bestTrimCandidate = {
+            priority: 2,
+            progress: Math.max(0.08, Math.min(1, hitRatio)),
+            strokeWidth: 3.8,
+            color: [255, 234, 75, 250],
+            circles: [[rushSx, rushSy, Math.max(8, bossR * 1.72)]],
+          };
+        }
       }
       continue;
     }
@@ -737,13 +934,56 @@ export function renderMacroWorldPass(
     }
   }
 
-  // 4. Commit Paint Styles Deterministically Across All World Layers
+  // 4. RadialGradient Plasma Core Glow (`shapes.coreGlow` — one-shot ownership transfer)
+  if (activeRushGlow !== null) {
+    const glowR = Math.max(12, activeRushGlow.radius);
+    const radGrad = new shapes.tvg.RadialGradient(activeRushGlow.cx, activeRushGlow.cy, glowR);
+    radGrad.setStops(
+      [0, [255, 250, 210, 170]],
+      [0.48, [255, 210, 40, 88]],
+      [1, [255, 42, 109, 0]]
+    );
+    shapes.coreGlow.appendCircle(activeRushGlow.cx, activeRushGlow.cy, glowR, glowR).fill(radGrad);
+  } else if (isOverdrive || combo >= 25) {
+    const pCx = tx(state.playerScreenX);
+    const pCy = ty(state.playerScreenY);
+    const auraR = Math.max(18, ts(state.playerRadius * (isOverdrive ? 3.2 : 2.4)));
+    const [ar, ag, ab] = isOverdrive ? [255, 232, 85] : [fr, fg, fb];
+    const radGrad = new shapes.tvg.RadialGradient(pCx, pCy, auraR);
+    radGrad.setStops(
+      [0, [255, 255, 240, isOverdrive ? 128 : 86]],
+      [0.45, [ar, ag, ab, isOverdrive ? 76 : 48]],
+      [1, [ar, ag, ab, 0]]
+    );
+    shapes.coreGlow.appendCircle(pCx, pCy, auraR, auraR).fill(radGrad);
+  }
+
+  // 5. Progressive Circular Arc Gauge (`shapes.trimArcs` via `Shape.trimPath(0, progress, true)`)
+  if (bestTrimCandidate !== null) {
+    for (let cIdx = 0; cIdx < bestTrimCandidate.circles.length; cIdx++) {
+      const [cx, cy, cr] = bestTrimCandidate.circles[cIdx]!;
+      shapes.trimArcs.appendCircle(cx, cy, cr, cr);
+    }
+    shapes.trimArcs
+      .trimPath(0, bestTrimCandidate.progress, true)
+      .fill(0, 0, 0, 0)
+      .stroke({
+        width: tw(bestTrimCandidate.strokeWidth),
+        color: bestTrimCandidate.color,
+        cap: roundCap,
+        join: roundJoin,
+      });
+  }
+
+  // 6. Commit Paint Styles Deterministically Across All World Layers
   if (hasBass) {
     shapes.bandBass
       .fill(255, 42, 109, 240)
       .stroke({
         width: tw(isOverdrive ? 2.6 : 2.2),
         color: isOverdrive ? [255, 240, 150, 255] : [255, 228, 238, 250],
+        cap: roundCap,
+        join: roundJoin,
       });
   }
   if (hasSynth) {
@@ -752,6 +992,8 @@ export function renderMacroWorldPass(
       .stroke({
         width: tw(isOverdrive ? 2.6 : 2.2),
         color: isOverdrive ? [255, 240, 150, 255] : [225, 252, 255, 250],
+        cap: roundCap,
+        join: roundJoin,
       });
   }
   if (hasTreble) {
@@ -760,6 +1002,8 @@ export function renderMacroWorldPass(
       .stroke({
         width: tw(2.5),
         color: [255, 252, 215, 255],
+        cap: roundCap,
+        join: roundJoin,
       });
   }
   if (hasWhiteCore) {
@@ -768,22 +1012,24 @@ export function renderMacroWorldPass(
       .stroke({
         width: tw(1.5),
         color: [215, 248, 255, 242],
+        cap: roundCap,
+        join: roundJoin,
       });
   }
   if (hasPrismStars) {
     shapes.prismStars
       .fill(255, 232, 62, 246)
-      .stroke({ width: tw(2.3), color: [255, 255, 230, 255] });
+      .stroke({ width: tw(2.3), color: [255, 255, 230, 255], cap: roundCap, join: roundJoin });
   }
   if (hasTimingRings) {
     shapes.timingRings
       .fill(0, 0, 0, 0)
-      .stroke({ width: tw(2.1), color: [210, 248, 255, 215] });
+      .stroke({ width: tw(2.1), color: [210, 248, 255, 215], cap: roundCap, join: roundJoin });
   }
   if (hasTraps) {
     shapes.traps
       .fill(250, 48, 76, 242)
-      .stroke({ width: tw(2.1), color: [255, 212, 185, 255] });
+      .stroke({ width: tw(2.1), color: [255, 212, 185, 255], cap: roundCap, join: roundJoin });
   }
 
   // Reticles additive plasma glow tinted toward active lane & beat pulse
@@ -798,5 +1044,7 @@ export function renderMacroWorldPass(
     .stroke({
       width: tw(1.8 + retGlowBoost * 1.4),
       color: [retColor[0], retColor[1], retColor[2], Math.round(148 + retGlowBoost * 102)],
+      cap: roundCap,
+      join: roundJoin,
     });
 }

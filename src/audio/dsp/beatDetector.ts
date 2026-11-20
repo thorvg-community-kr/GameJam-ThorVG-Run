@@ -118,6 +118,38 @@ export interface DspAnalysisResult {
   sectionCounts: Record<SectionIntensity, number>;
 }
 
+interface CachedTrackStftFeatures {
+  sampleRate: number;
+  durationSec: number;
+  hopSec: number;
+  numFrames: number;
+  rawTotalFlux: Float32Array;
+  nKick: Float32Array;
+  nLowMid: Float32Array;
+  nMidHigh: Float32Array;
+  nHat: Float32Array;
+  nLowE: Float32Array;
+  nMidE: Float32Array;
+  nHighE: Float32Array;
+  nOverallE: Float32Array;
+  frameCentroid: Float32Array;
+  onsetFlux: Float32Array;
+  bpm: number;
+  beatPhaseSec: number;
+  totalSlices: number;
+  sliceLow: number[];
+  sliceMid: number[];
+  sliceHigh: number[];
+  sliceOverall: number[];
+  rollingEnergy: number[];
+  calmThreshold: number;
+  sectionCounts: Record<SectionIntensity, number>;
+  sliceIntensity: SectionIntensity[];
+  sliceBand: ResonanceFormType[];
+}
+
+const stftFeatureCache = new WeakMap<AudioBuffer, CachedTrackStftFeatures>();
+
 export function nextFrame(): Promise<void> {
   return new Promise((resolve) => {
     if (typeof requestAnimationFrame === 'function') {
@@ -263,25 +295,16 @@ function estimateBpmAndPhase(
   return { bpm, beatPhaseSec: bestPhaseSec };
 }
 
-/**
- * Stage 1 & 2 DSP Pipeline (`rhythm-slasher-v6` — 4-Band Hann STFT `SuperFlux`):
- * - 1024-pt Hann STFT (`~10ms` hop) + in-place Radix-2 FFT
- * - Log-magnitude compression `ln(1 + 40 * mag)`, 3-bin frequency max-filter, 2-frame lag `SuperFlux`
- *   across 4 perceptual bands:
- *   1. `kickFlux` (`35–140Hz`)
- *   2. `lowMidFlux` (`140–500Hz`)
- *   3. `midHighFlux` (`500–4500Hz` — Snare / Rap vocals / Synth lead)
- *   4. `hatFlux` (`4500–12000Hz` — Hi-Hat / Cymbal transients)
- * - Autocorrelation BPM (`85..185` folded) + beat phase estimation with silent-buffer `NaN` protection
- * - Sliding Median/MAD peak picking + 3-point parabolic sub-frame interpolation + `1/4` & `1/3` hybrid beat-grid soft-snap
- */
-export async function extractAudioSlicesAndBeats(
+async function computeOrGetStftFeatures(
   buffer: AudioBuffer,
-  worldPxPerSec: number,
-  tuning: DifficultyDspTuning,
   onProgress?: (status: LoadingProgress) => void
-): Promise<DspAnalysisResult> {
-  const segWidth = worldPxPerSec * SLICE_DURATION_SEC;
+): Promise<CachedTrackStftFeatures> {
+  const cached = stftFeatureCache.get(buffer);
+  if (cached) {
+    onProgress?.({ progress: 0.55, stage: 'analyzingBands' });
+    return cached;
+  }
+
   const sampleRate = Math.max(8000, buffer.sampleRate || 44100);
   const totalSamples = buffer.length;
   const durationSec = Math.max(0.1, buffer.duration || totalSamples / sampleRate);
@@ -328,6 +351,7 @@ export async function extractAudioSlicesAndBeats(
   const rawLowMidFlux = new Float32Array(numFrames);
   const rawMidHighFlux = new Float32Array(numFrames);
   const rawHatFlux = new Float32Array(numFrames);
+  const rawTotalFlux = new Float32Array(numFrames);
 
   const frameLowE = new Float32Array(numFrames);
   const frameMidE = new Float32Array(numFrames);
@@ -429,6 +453,9 @@ export async function extractAudioSlicesAndBeats(
         if (diff > 0) hf += diff;
       }
       rawHatFlux[f] = hf / Math.max(1, bHat1 - bHat0 + 1);
+
+      rawTotalFlux[f] =
+        rawKickFlux[f]! + rawLowMidFlux[f]! + rawMidHighFlux[f]! + rawHatFlux[f]!;
     }
 
     // Rotate lag buffers without allocating
@@ -437,7 +464,7 @@ export async function extractAudioSlicesAndBeats(
     maxSpecLag1 = curMaxSpec;
     curMaxSpec = recycle;
 
-    if (f > 0 && f % 900 === 0) {
+    if (f > 0 && f % 450 === 0) {
       onProgress?.({
         progress: 0.2 + (f / numFrames) * 0.35,
         stage: 'analyzingBands',
@@ -471,7 +498,6 @@ export async function extractAudioSlicesAndBeats(
   const nHighE = new Float32Array(numFrames);
   const nOverallE = new Float32Array(numFrames);
 
-  const combinedFlux = new Float32Array(numFrames);
   const onsetFlux = new Float32Array(numFrames);
   const pulseEnv = new Float32Array(numFrames);
 
@@ -489,7 +515,6 @@ export async function extractAudioSlicesAndBeats(
     // Balanced multi-band onset + dominant-band salience so solo vocal/guitar/snare transients stand out clearly
     const baseFlux = k * 0.34 + lm * 0.16 + mh * 0.34 + h * 0.16;
     const domBand = Math.max(k * 0.92, lm * 0.85, mh * 1.0, h * 0.82);
-    combinedFlux[f] = baseFlux;
     onsetFlux[f] = baseFlux * 0.55 + domBand * 0.45;
     pulseEnv[f] = k * 0.48 + lm * 0.18 + mh * 0.26 + h * 0.08;
 
@@ -503,9 +528,6 @@ export async function extractAudioSlicesAndBeats(
   }
 
   const { bpm, beatPhaseSec } = estimateBpmAndPhase(pulseEnv, hopSec, durationSec);
-  const beatSec = 60 / bpm;
-  const stepQuarter = beatSec / 4; // 16th-note grid
-  const stepTriplet = beatSec / 3; // Triplet grid
 
   // Aggregate 0.25s slices for waveform minimap & section intensity classification
   const totalSlices = Math.max(8, Math.ceil(durationSec / SLICE_DURATION_SEC));
@@ -574,6 +596,92 @@ export async function extractAudioSlicesAndBeats(
     sectionCounts[inten]++;
   }
 
+  const computed: CachedTrackStftFeatures = {
+    sampleRate,
+    durationSec,
+    hopSec,
+    numFrames,
+    rawTotalFlux,
+    nKick,
+    nLowMid,
+    nMidHigh,
+    nHat,
+    nLowE,
+    nMidE,
+    nHighE,
+    nOverallE,
+    frameCentroid,
+    onsetFlux,
+    bpm,
+    beatPhaseSec,
+    totalSlices,
+    sliceLow,
+    sliceMid,
+    sliceHigh,
+    sliceOverall,
+    rollingEnergy,
+    calmThreshold,
+    sectionCounts,
+    sliceIntensity,
+    sliceBand,
+  };
+  stftFeatureCache.set(buffer, computed);
+  return computed;
+}
+
+/**
+ * Stage 1 & 2 DSP Pipeline (`rhythm-slasher-v6` — 4-Band Hann STFT `SuperFlux`):
+ * - 1024-pt Hann STFT (`~10ms` hop) + in-place Radix-2 FFT cached per `AudioBuffer` via `WeakMap`
+ * - Log-magnitude compression `ln(1 + 40 * mag)`, 3-bin frequency max-filter, 2-frame lag `SuperFlux`
+ *   across 4 perceptual bands:
+ *   1. `kickFlux` (`35–140Hz`)
+ *   2. `lowMidFlux` (`140–500Hz`)
+ *   3. `midHighFlux` (`500–4500Hz` — Snare / Rap vocals / Synth lead)
+ *   4. `hatFlux` (`4500–12000Hz` — Hi-Hat / Cymbal transients)
+ * - Autocorrelation BPM (`85..185` folded) + beat phase estimation with silent-buffer `NaN` protection
+ * - Sliding Median/MAD peak picking + 3-point parabolic sub-frame interpolation + `1/4` & `1/3` hybrid beat-grid soft-snap
+ */
+export async function extractAudioSlicesAndBeats(
+  buffer: AudioBuffer,
+  worldPxPerSec: number,
+  tuning: DifficultyDspTuning,
+  onProgress?: (status: LoadingProgress) => void
+): Promise<DspAnalysisResult> {
+  const segWidth = worldPxPerSec * SLICE_DURATION_SEC;
+  const {
+    sampleRate,
+    durationSec,
+    hopSec,
+    numFrames,
+    rawTotalFlux,
+    nKick,
+    nLowMid,
+    nMidHigh,
+    nHat,
+    nLowE,
+    nMidE,
+    nHighE,
+    nOverallE,
+    frameCentroid,
+    onsetFlux,
+    bpm,
+    beatPhaseSec,
+    totalSlices,
+    sliceLow,
+    sliceMid,
+    sliceHigh,
+    sliceOverall,
+    rollingEnergy,
+    calmThreshold,
+    sectionCounts,
+    sliceIntensity,
+    sliceBand,
+  } = await computeOrGetStftFeatures(buffer, onProgress);
+
+  const beatSec = 60 / bpm;
+  const stepQuarter = beatSec / 4; // 16th-note grid
+  const stepTriplet = beatSec / 3; // Triplet grid
+
   // Section- & tempo-aware sliding Median/MAD thresholding + parabolic peak + subtle micro-timing polish
   const isCasual = tuning.minBeatGapSec >= 0.24;
   const madMult = tuning.madMultiplier ?? 1.05;
@@ -587,16 +695,23 @@ export async function extractAudioSlicesAndBeats(
 
   for (let f = 2; f < numFrames - 2; f++) {
     const y1 = onsetFlux[f]!;
-    if (y1 <= 0 || y1 < tuning.fluxGate * 0.85) continue;
+    if (y1 <= 0 || y1 < tuning.fluxGate * 0.55) continue;
 
     const fSlice = Math.min(
       totalSlices - 1,
       Math.max(0, Math.floor((f * hopSec) / SLICE_DURATION_SEC))
     );
     const secInten = sliceIntensity[fSlice] ?? 'groove';
+    const hasAudibleCalmAttack = secInten === 'calm' && rawTotalFlux[f]! >= 0.018;
+    const calmScale = hasAudibleCalmAttack
+      ? Math.max(
+          0.56,
+          Math.min(0.92, (rollingEnergy[fSlice] ?? 0.2) / Math.max(0.18, calmThreshold))
+        )
+      : 1.18;
     const effectiveFluxGate =
       secInten === 'calm'
-        ? tuning.fluxGate * 1.18
+        ? tuning.fluxGate * calmScale
         : secInten === 'drop'
           ? tuning.fluxGate * 0.88
           : tuning.fluxGate;
@@ -625,7 +740,9 @@ export async function extractAudioSlicesAndBeats(
 
     const effectiveMadMult =
       secInten === 'calm'
-        ? madMult * 1.12
+        ? hasAudibleCalmAttack
+          ? madMult * 0.96
+          : madMult * 1.12
         : secInten === 'drop'
           ? madMult * 0.88
           : madMult;
@@ -659,7 +776,7 @@ export async function extractAudioSlicesAndBeats(
         ? tuning.minBeatGapSec * 1.25
         : secInten === 'drop'
           ? isCasual
-            ? Math.max(tuning.minBeatGapSec * 0.9, beatSec * 0.48)
+            ? Math.max(0.2, Math.min(tuning.minBeatGapSec * 0.9, beatSec * 0.48))
             : Math.max(0.115, Math.min(tuning.minBeatGapSec * 0.85, beatSec * 0.44))
           : isCasual
             ? tuning.minBeatGapSec
@@ -772,8 +889,8 @@ export async function extractAudioSlicesAndBeats(
     slices,
     beatEvents,
     sliceHasBeat,
-    sliceIntensity,
-    sliceBand,
-    sectionCounts,
+    sliceIntensity: [...sliceIntensity],
+    sliceBand: [...sliceBand],
+    sectionCounts: { ...sectionCounts },
   };
 }

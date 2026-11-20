@@ -119,6 +119,14 @@ const INITIAL_HUD: HUDTelemetry = {
   rank: 'S',
   judgment: null,
   judgmentCounts: { perfect: 0, great: 0, good: 0, miss: 0 },
+  judgmentTelemetry: {
+    criticalCount: 0,
+    fastCount: 0,
+    slowCount: 0,
+    timedHitCount: 0,
+    meanSignedDeltaMs: 0,
+  },
+  holdBreaks: 0,
   gimmicksTriggered: 0,
   isNewRecord: false,
   scoreDelta: 0,
@@ -540,7 +548,7 @@ export const App: React.FC = () => {
     lastSizeRef.current = { w: initW, h: initH };
 
     renderer
-      .init(canvasEl, initW, initH)
+      .init(canvasEl, initW, initH, { skipSplash: splashStartedRef.current })
       .then(() => {
         if (cancelled || !renderer.ready) return;
         const { w, h } = measureViewportSize();
@@ -810,7 +818,7 @@ export const App: React.FC = () => {
       const evictedSet = new Set(evictedIds);
       setCustomTracks((prev) => [
         decodedTrack,
-        ...prev.filter((item) => !evictedSet.has(item.id)),
+        ...prev.filter((item) => item.id !== decodedTrack.id && !evictedSet.has(item.id)),
       ]);
       videoPlaybackBlockedRef.current = false;
       setVideoPlaybackBlocked(false);
@@ -907,6 +915,7 @@ export const App: React.FC = () => {
         let resolvedTrack = selectedTrack;
         if (selectedTrack.isCustom && Number.isFinite(blueprint.bpm) && blueprint.bpm > 0) {
           const detectedBpm = Math.round(blueprint.bpm);
+          audioRef.current?.updateCustomTrackBpm(selectedTrack.id, detectedBpm);
           if (detectedBpm !== selectedTrack.bpm) {
             resolvedTrack = { ...selectedTrack, bpm: detectedBpm };
             selectedTrackRef.current = resolvedTrack;

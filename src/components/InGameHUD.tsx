@@ -48,12 +48,21 @@ export const InGameHUD: React.FC<InGameHUDProps> = ({
   const totalOrbs = hud.totalOrbs ?? 0;
   const starsCollected = hud.starsCollected ?? 0;
   const totalStars = hud.totalStars ?? 3;
-  const isNoMiss = (hud.judgmentCounts?.miss ?? 0) === 0;
+  const isNoMiss = (hud.judgmentCounts?.miss ?? 0) === 0 && (hud.holdBreaks ?? 0) === 0;
   const accuracyText = (hud.accuracy ?? 100).toFixed(1);
   const diffMode = hud.difficulty ?? 'standard';
   const sfxMode = hud.sfxMode ?? 'full';
-  const sfxLabel =
-    sfxMode === 'full' ? t.hud.sfxFull : sfxMode === 'impact' ? t.hud.sfxImpact : t.hud.sfxOff;
+  const sfxLabel = isCoarsePointer
+    ? sfxMode === 'full'
+      ? t.hud.sfxFullTouch
+      : sfxMode === 'impact'
+        ? t.hud.sfxImpactTouch
+        : t.hud.sfxOffTouch
+    : sfxMode === 'full'
+      ? t.hud.sfxFull
+      : sfxMode === 'impact'
+        ? t.hud.sfxImpact
+        : t.hud.sfxOff;
   const videoBgLabel = isCoarsePointer
     ? videoBgEnabled
       ? t.hud.videoBgOnTouch
@@ -196,7 +205,7 @@ export const InGameHUD: React.FC<InGameHUDProps> = ({
                 type="button"
                 data-testid="hud-video-bg-toggle-btn"
                 aria-pressed={videoBgEnabled}
-                title={t.hud.videoBgTitle}
+                title={isCoarsePointer ? t.hud.videoBgTitleTouch : t.hud.videoBgTitle}
                 className={`hud-btn video-bg-toggle-btn${videoBgEnabled ? ' active' : ''}`}
                 onClick={onToggleVideoBg}
               >
@@ -217,7 +226,7 @@ export const InGameHUD: React.FC<InGameHUDProps> = ({
               type="button"
               data-testid="hud-zoom-out"
               className="hud-btn hud-zoom-step-btn"
-              title={t.hud.zoomOutTitle}
+              title={isCoarsePointer ? t.hud.zoomOutTitleTouch : t.hud.zoomOutTitle}
               onClick={() => onStepZoom(1 / 1.25)}
             >
               −
@@ -229,7 +238,7 @@ export const InGameHUD: React.FC<InGameHUDProps> = ({
               type="button"
               data-testid="hud-zoom-in"
               className="hud-btn hud-zoom-step-btn"
-              title={t.hud.zoomInTitle}
+              title={isCoarsePointer ? t.hud.zoomInTitleTouch : t.hud.zoomInTitle}
               onClick={() => onStepZoom(1.25)}
             >
               +
@@ -246,10 +255,16 @@ export const InGameHUD: React.FC<InGameHUDProps> = ({
               type="button"
               data-testid="hud-cinematic-btn"
               className={`hud-btn hud-cinematic-btn${hud.cinematicCamera ? ' active' : ''}`}
-              title={t.hud.cinematicTitle}
+              title={isCoarsePointer ? t.hud.cinematicTitleTouch : t.hud.cinematicTitle}
               onClick={onToggleCinematicCamera}
             >
-              {hud.cinematicCamera ? t.hud.cinematicAuto : t.hud.cinematicFixed}
+              {isCoarsePointer
+                ? hud.cinematicCamera
+                  ? t.hud.cinematicAutoTouch
+                  : t.hud.cinematicFixedTouch
+                : hud.cinematicCamera
+                  ? t.hud.cinematicAuto
+                  : t.hud.cinematicFixed}
             </button>
           </div>
 
@@ -300,14 +315,16 @@ export const InGameHUD: React.FC<InGameHUDProps> = ({
           className="hud-center-banner"
           style={{
             borderColor:
-              hud.statusBanner.key === 'grooveDanger' || hud.statusBanner.key === 'grooveDepleted'
+              hud.statusBanner.key === 'grooveDanger' ||
+              hud.statusBanner.key === 'grooveDepleted' ||
+              hud.statusBanner.key === 'holdBreak'
                 ? '#FF2A6D'
                 : hud.overdriveActive || hud.statusBanner.key === 'chordCross'
                   ? '#FFE600'
                   : formCfg.colorHex,
           }}
         >
-          {resolveBanner(t, hud.statusBanner)}
+          {resolveBanner(t, hud.statusBanner, isCoarsePointer)}
         </div>
       )}
 

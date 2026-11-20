@@ -17,13 +17,34 @@ interface I18nContextValue {
 
 const I18nContext = createContext<I18nContextValue | null>(null);
 
+export const LANG_STORAGE_KEY = 'thorvg_run:lang:v1';
+
+function loadInitialLang(): Lang {
+  try {
+    const saved = window.localStorage.getItem(LANG_STORAGE_KEY);
+    if (saved === 'en' || saved === 'ko') {
+      return saved;
+    }
+  } catch {
+    // Ignore storage access errors (e.g. private browsing / restricted context).
+  }
+  return DEFAULT_LANG;
+}
+
 /**
- * Provides the active language. Always starts in English and is intentionally
- * not persisted: every fresh page load begins in `DEFAULT_LANG`.
+ * Provides the active language. Defaults to `DEFAULT_LANG` (`'en'`) when unset,
+ * and restores/persists `'en' | 'ko'` only when explicitly switched by the user.
  */
 export function I18nProvider({ children }: { children: React.ReactNode }): React.JSX.Element {
-  const [lang, setLangState] = useState<Lang>(DEFAULT_LANG);
-  const setLang = useCallback((next: Lang) => setLangState(next), []);
+  const [lang, setLangState] = useState<Lang>(() => loadInitialLang());
+  const setLang = useCallback((next: Lang) => {
+    setLangState(next);
+    try {
+      window.localStorage.setItem(LANG_STORAGE_KEY, next);
+    } catch {
+      // Ignore storage access errors.
+    }
+  }, []);
   const t = MESSAGES[lang];
 
   useEffect(() => {

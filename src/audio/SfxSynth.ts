@@ -247,6 +247,21 @@ export class SfxSynth {
     this.schedulePercussiveTone(1850, 920, 0.022, 0.04 * polyScale, 'sine');
   }
 
+  public playHoldBreak(): void {
+    if (
+      this.mode === 'off' ||
+      this.volume <= 0.0001 ||
+      !this.ctx ||
+      this.ctx.state !== 'running'
+    ) {
+      return;
+    }
+    const polyScale = this.consumePolyphonicScale(this.ctx.currentTime);
+    this.scheduleNoiseTransient(2400, 'bandpass', 2.2, 0.048, 0.14 * polyScale);
+    this.schedulePercussiveTone(680, 92, 0.085, 0.15 * polyScale, 'sawtooth', 0, 0.0006);
+    this.schedulePercussiveTone(220, 48, 0.11, 0.14 * polyScale, 'triangle', 0.006, 0.001);
+  }
+
   public playRushHit(step: number): void {
     if (this.mode === 'off' || !this.ctx || this.ctx.state !== 'running') return;
     const polyScale = this.consumePolyphonicScale(this.ctx.currentTime);

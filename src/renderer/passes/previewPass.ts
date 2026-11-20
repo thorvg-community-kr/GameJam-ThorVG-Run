@@ -35,9 +35,9 @@ const PREVIEW_PATTERN: readonly PreviewTargetKind[] = [
 /**
  * Stateless Start-Menu 2-Lane Rhythm Slasher Demo Render Pass:
  * Renders a live, beat-synchronized 2-Lane Slasher showcase in the background & left gutter:
- * - Continuous 1F neon stage deck + equalizer spectrum + 2F Cyan sky rail guide line
- * - Fixed Dual Neon Target Reticles (Cyan 2F HIGH, Crimson 1F LOW) + beat sync beam
- * - Incoming Cyan drones, Crimson hex cores, Twin Gold shield chords, Prism Stars & 1F Sawblades
+ * - Cyber Horizon sky `LinearGradient` + 1F neon stage deck `LinearGradient` + 2F Cyan `skyDash` rail
+ * - Fixed Dual Neon Target Reticles (`RadialGradient` `coreGlow`) + beat sync beam
+ * - Incoming Cyan drones, Crimson hex cores, Twin Gold shield chords, Prism Stars, `trimPath` sweep & 1F Sawblades
  * - Periodic auto-slash 3rd-order Bezier katana arcs & NonZero vector polygon bisection shards!
  */
 export function renderMenuPreviewPass(
@@ -99,6 +99,8 @@ export function renderMenuPreviewPass(
   }
 
   const stageScale = Math.min(1.08, playerRadius / 24);
+  const roundCap = shapes.tvg.StrokeCap.Round;
+  const roundJoin = shapes.tvg.StrokeJoin.Round;
 
   const scrollPx = timeSec * speed;
   const beatSpacing = 228;
@@ -120,8 +122,14 @@ export function renderMenuPreviewPass(
   const formCfg = FORM_CONFIG[activeForm];
   const [r, g, b] = formCfg.rgb;
 
-  // 1. Deep cyber background
-  shapes.bg.reset().appendRect(0, 0, width, height).fill(9, 11, 22, 255);
+  // 1. Deep cyber horizon sky LinearGradient (one-shot ownership transfer)
+  const skyGrad = new shapes.tvg.LinearGradient(0, 0, 0, Math.max(1, height));
+  skyGrad.setStops(
+    [0, [8, 12, 28, 255]],
+    [0.55, [12, 17, 38, 255]],
+    [1, [6, 8, 18, 255]]
+  );
+  shapes.bg.reset().appendRect(0, 0, width, height).fill(skyGrad);
 
   // 2. Fast-scrolling neon rhythm grid across full canvas (`0..height`)
   shapes.grid.reset().fill(0, 0, 0, 0);
@@ -136,7 +144,7 @@ export function renderMenuPreviewPass(
   }
   shapes.grid.stroke({ width: 1, color: [35, 55, 95, 86] });
 
-  // Reset all pooled world & VFX layers cleanly with zero paint bleed
+  // Reset all pooled world & VFX layers cleanly with zero paint/dash/trimPath bleed
   resetWorldShapeLayers(shapes);
   shapes.effects.reset().fill(0, 0, 0, 0);
   shapes.vfxGold.reset().fill(0, 0, 0, 0);
@@ -150,7 +158,7 @@ export function renderMenuPreviewPass(
   shapes.vfxSlashCrimson.reset().fill(0, 0, 0, 0);
   shapes.vfxSlashCore.reset().fill(0, 0, 0, 0);
 
-  // 3. 2F Cyan Sky Rail Guide Line + Beat Pulse Ticks (`shapes.aurora`)
+  // 3. 2F Cyan Sky Rail Guide Line (`shapes.aurora`) + Scrolling Dash Rail (`shapes.skyDash`)
   const beatPhase = ((scrollPx + reticleX) % beatSpacing) / beatSpacing;
   const beatPulse = Math.pow(Math.max(0, 1 - beatPhase * 2.2), 2);
 
@@ -163,16 +171,51 @@ export function renderMenuPreviewPass(
   }
   shapes.aurora
     .fill(0, 0, 0, 0)
-    .stroke({ width: 1.9, color: [5, 213, 255, Math.round(86 + beatPulse * 48)] });
+    .stroke({
+      width: 1.9,
+      color: [5, 213, 255, Math.round(86 + beatPulse * 48)],
+      cap: roundCap,
+      join: roundJoin,
+    });
 
-  // 4. Floating Holographic 1F Neon Stage Bridge + Clamped Equalizer Bars
+  const dashLen = 16 * stageScale;
+  const gapLen = 10 * stageScale;
+  const dashPeriod = dashLen + gapLen;
+  shapes.skyDash
+    .moveTo(reticleX, laneHighY + 5 * stageScale)
+    .lineTo(width, laneHighY + 5 * stageScale)
+    .fill(0, 0, 0, 0)
+    .stroke({
+      width: 1.5 * stageScale,
+      color: [5, 213, 255, Math.round(74 + beatPulse * 44)],
+      cap: roundCap,
+      join: roundJoin,
+      dash: [dashLen, gapLen],
+      dashOffset: scrollPx % dashPeriod,
+    });
+
+  // 4. Floating Holographic 1F Neon Stage Bridge (`LinearGradient`) + Clamped Equalizer Bars
+  const deckR = Math.round(r * 0.55 + 255 * 0.45);
+  const deckG = Math.round(g * 0.55 + 42 * 0.45);
+  const deckB = Math.round(b * 0.55 + 109 * 0.45);
+  const deckGrad = new shapes.tvg.LinearGradient(
+    0,
+    floorY,
+    0,
+    Math.max(floorY + 12, deckBottomY)
+  );
+  deckGrad.setStops(
+    [0, [deckR, deckG, deckB, 84]],
+    [0.48, [r, g, b, 38]],
+    [1, [Math.round(r * 0.3), Math.round(g * 0.3), Math.round(b * 0.45), 6]]
+  );
   shapes.waveFill
     .moveTo(0, deckBottomY)
     .lineTo(0, floorY)
     .lineTo(width, floorY)
     .lineTo(width, deckBottomY)
     .close()
-    .fill(r, g, b, 36)
+    .fill(deckGrad)
     .stroke({ width: 0, color: [0, 0, 0, 0] });
 
   const specTileW = 190;
@@ -189,7 +232,9 @@ export function renderMenuPreviewPass(
       shapes.spectrum.appendRect(bx, deckBottomY - bh, barW, bh, { rx: 2, ry: 2 });
     }
   }
-  shapes.spectrum.fill(r, g, b, 68).stroke({ width: 1, color: [r, g, b, 98] });
+  shapes.spectrum
+    .fill(r, g, b, 68)
+    .stroke({ width: 1, color: [r, g, b, 98], cap: roundCap, join: roundJoin });
 
   shapes.waveGlow
     .moveTo(0, floorY)
@@ -197,7 +242,7 @@ export function renderMenuPreviewPass(
     .moveTo(reticleX, laneLowY)
     .lineTo(width, laneLowY)
     .fill(0, 0, 0, 0)
-    .stroke({ width: 6.5 * stageScale, color: [255, 42, 109, 92] });
+    .stroke({ width: 6.5 * stageScale, color: [255, 42, 109, 92], cap: roundCap, join: roundJoin });
 
   shapes.waveCore
     .moveTo(0, floorY)
@@ -205,7 +250,20 @@ export function renderMenuPreviewPass(
     .moveTo(0, deckBottomY)
     .lineTo(width, deckBottomY)
     .fill(0, 0, 0, 0)
-    .stroke({ width: 2.6, color: [220, 246, 255, 225] });
+    .stroke({ width: 2.6, color: [220, 246, 255, 225], cap: roundCap, join: roundJoin });
+
+  // Dual Reticle RadialGradient Plasma Aura (`shapes.coreGlow`)
+  const reticleMidY = (laneHighY + laneLowY) * 0.5;
+  const reticleGlowR = Math.max(48, (laneLowY - laneHighY) * 1.15);
+  const reticleRadGrad = new shapes.tvg.RadialGradient(reticleX, reticleMidY, reticleGlowR);
+  reticleRadGrad.setStops(
+    [0, [r, g, b, Math.round(44 + beatPulse * 36)]],
+    [0.55, [5, 213, 255, Math.round(20 + beatPulse * 18)]],
+    [1, [r, g, b, 0]]
+  );
+  shapes.coreGlow
+    .appendCircle(reticleX, reticleMidY, reticleGlowR, reticleGlowR)
+    .fill(reticleRadGrad);
 
   // 5. Incoming Beat Targets, Auto-Slash Katana Arcs & Live Sliced Polygon Halves
   let hasBass = true;
@@ -230,11 +288,18 @@ export function renderMenuPreviewPass(
   let reticlePulseHigh = 0;
   let reticlePulseLow = 0;
 
+  let bestApproachDt = Infinity;
+  let bestApproachSx = 0;
+  let bestApproachKind: Exclude<PreviewTargetKind, 'sawblade'> | null = null;
+
   const firstBeat = Math.floor((scrollPx - 240) / beatSpacing);
   const lastBeat = Math.ceil((scrollPx + width + 140) / beatSpacing);
 
   for (let bIdx = firstBeat; bIdx <= lastBeat; bIdx++) {
-    const kind = PREVIEW_PATTERN[((bIdx % PREVIEW_PATTERN.length) + PREVIEW_PATTERN.length) % PREVIEW_PATTERN.length]!;
+    const kind =
+      PREVIEW_PATTERN[
+        ((bIdx % PREVIEW_PATTERN.length) + PREVIEW_PATTERN.length) % PREVIEW_PATTERN.length
+      ]!;
     const worldX = bIdx * beatSpacing;
     const sx = worldX - scrollPx;
     const dx = sx - reticleX;
@@ -281,6 +346,12 @@ export function renderMenuPreviewPass(
           shapes.timingRings.appendCircle(sx, tyLane, ringR, ringR);
         }
         hasTimingRings = true;
+
+        if (dtSec < bestApproachDt) {
+          bestApproachDt = dtSec;
+          bestApproachSx = sx;
+          bestApproachKind = kind;
+        }
       }
 
       if (kind === 'prismHigh') {
@@ -418,7 +489,7 @@ export function renderMenuPreviewPass(
           kind === 'chord' || kind === 'prismHigh'
             ? shapes.vfxSlicedGold
             : kind === 'low'
-              ? shapes.vfxSlicedCrimson
+               ? shapes.vfxSlicedCrimson
               : shapes.vfxSlicedCyan;
         if (kind === 'chord' || kind === 'prismHigh') {
           slicedGoldAlpha = Math.max(slicedGoldAlpha, alpha);
@@ -455,6 +526,29 @@ export function renderMenuPreviewPass(
     }
   }
 
+  // Closest incoming target progressive `trimPath` sweep arc (`shapes.trimArcs`)
+  if (bestApproachKind !== null && bestApproachDt <= 0.28) {
+    const sweep = Math.max(0.08, Math.min(1, 1 - bestApproachDt / 0.28));
+    const arcR = 16.5 * stageScale * 1.58;
+    if (bestApproachKind === 'chord') {
+      shapes.trimArcs.appendCircle(bestApproachSx, laneHighY, arcR, arcR);
+      shapes.trimArcs.appendCircle(bestApproachSx, laneLowY, arcR, arcR);
+    } else {
+      const tyLane = bestApproachKind === 'low' ? laneLowY : laneHighY;
+      shapes.trimArcs.appendCircle(bestApproachSx, tyLane, arcR, arcR);
+    }
+    const arcColor: readonly [number, number, number, number] =
+      bestApproachKind === 'chord' || bestApproachKind === 'prismHigh'
+        ? [255, 234, 80, 236]
+        : bestApproachKind === 'low'
+          ? [255, 92, 148, 236]
+          : [80, 236, 255, 236];
+    shapes.trimArcs
+      .trimPath(0, sweep, true)
+      .fill(0, 0, 0, 0)
+      .stroke({ width: 2.4 * stageScale, color: arcColor, cap: roundCap, join: roundJoin });
+  }
+
   // 6. Dual Neon Reticle Geometry
   const rHigh = (playerLane === 'high' ? 22 : 19.5) * stageScale * (1 + reticlePulseHigh * 0.38);
   const rLow = (playerLane === 'low' ? 22 : 19.5) * stageScale * (1 + reticlePulseLow * 0.38);
@@ -474,25 +568,39 @@ export function renderMenuPreviewPass(
 
   // 7. Commit All Preview Paint Styles
   if (hasBass) {
-    shapes.bandBass.fill(255, 42, 109, 236).stroke({ width: 2.1, color: [255, 230, 240, 248] });
+    shapes.bandBass
+      .fill(255, 42, 109, 236)
+      .stroke({ width: 2.1, color: [255, 230, 240, 248], cap: roundCap, join: roundJoin });
   }
   if (hasSynth) {
-    shapes.bandSynth.fill(5, 213, 255, 236).stroke({ width: 2.1, color: [225, 252, 255, 248] });
+    shapes.bandSynth
+      .fill(5, 213, 255, 236)
+      .stroke({ width: 2.1, color: [225, 252, 255, 248], cap: roundCap, join: roundJoin });
   }
   if (hasTreble) {
-    shapes.bandTreble.fill(255, 226, 24, 242).stroke({ width: 2.3, color: [255, 252, 215, 252] });
+    shapes.bandTreble
+      .fill(255, 226, 24, 242)
+      .stroke({ width: 2.3, color: [255, 252, 215, 252], cap: roundCap, join: roundJoin });
   }
   if (hasWhiteCore) {
-    shapes.gimmicks.fill(255, 255, 255, 248).stroke({ width: 1.4, color: [215, 248, 255, 240] });
+    shapes.gimmicks
+      .fill(255, 255, 255, 248)
+      .stroke({ width: 1.4, color: [215, 248, 255, 240], cap: roundCap, join: roundJoin });
   }
   if (hasPrismStars) {
-    shapes.prismStars.fill(255, 232, 62, 246).stroke({ width: 2.2, color: [255, 255, 230, 255] });
+    shapes.prismStars
+      .fill(255, 232, 62, 246)
+      .stroke({ width: 2.2, color: [255, 255, 230, 255], cap: roundCap, join: roundJoin });
   }
   if (hasTimingRings) {
-    shapes.timingRings.fill(0, 0, 0, 0).stroke({ width: 2.0, color: [210, 248, 255, 205] });
+    shapes.timingRings
+      .fill(0, 0, 0, 0)
+      .stroke({ width: 2.0, color: [210, 248, 255, 205], cap: roundCap, join: roundJoin });
   }
   if (hasTraps) {
-    shapes.traps.fill(250, 48, 76, 240).stroke({ width: 2.0, color: [255, 212, 185, 250] });
+    shapes.traps
+      .fill(250, 48, 76, 240)
+      .stroke({ width: 2.0, color: [255, 212, 185, 250], cap: roundCap, join: roundJoin });
   }
 
   const retPulse = Math.max(reticlePulseHigh, reticlePulseLow, beatPulse * 0.6);
@@ -503,62 +611,64 @@ export function renderMenuPreviewPass(
     .stroke({
       width: 1.8 + retPulse * 1.2,
       color: [retRgb[0], retRgb[1], retRgb[2], Math.round(145 + retPulse * 95)],
+      cap: roundCap,
+      join: roundJoin,
     });
 
   if (hasVfxGold) {
     shapes.vfxGold
       .fillRule(shapes.evenOddRule)
       .fill(255, 230, 65, 215)
-      .stroke({ width: 1.4, color: [255, 250, 190, 230] });
+      .stroke({ width: 1.4, color: [255, 250, 190, 230], cap: roundCap, join: roundJoin });
   }
   if (hasVfxCyan) {
     shapes.vfxCyan
       .fillRule(shapes.evenOddRule)
       .fill(5, 213, 255, 215)
-      .stroke({ width: 1.4, color: [195, 248, 255, 230] });
+      .stroke({ width: 1.4, color: [195, 248, 255, 230], cap: roundCap, join: roundJoin });
   }
   if (hasVfxCrimson) {
     shapes.vfxCrimson
       .fillRule(shapes.evenOddRule)
       .fill(255, 45, 108, 215)
-      .stroke({ width: 1.4, color: [255, 200, 220, 230] });
+      .stroke({ width: 1.4, color: [255, 200, 220, 230], cap: roundCap, join: roundJoin });
   }
 
   if (slicedGoldAlpha > 0) {
     shapes.vfxSlicedGold
       .fill(255, 226, 48, Math.round(slicedGoldAlpha * 0.9))
-      .stroke({ width: 1.6, color: [255, 252, 200, slicedGoldAlpha] });
+      .stroke({ width: 1.6, color: [255, 252, 200, slicedGoldAlpha], cap: roundCap, join: roundJoin });
   }
   if (slicedCyanAlpha > 0) {
     shapes.vfxSlicedCyan
       .fill(5, 213, 255, Math.round(slicedCyanAlpha * 0.9))
-      .stroke({ width: 1.6, color: [210, 250, 255, slicedCyanAlpha] });
+      .stroke({ width: 1.6, color: [210, 250, 255, slicedCyanAlpha], cap: roundCap, join: roundJoin });
   }
   if (slicedCrimsonAlpha > 0) {
     shapes.vfxSlicedCrimson
       .fill(255, 42, 109, Math.round(slicedCrimsonAlpha * 0.9))
-      .stroke({ width: 1.6, color: [255, 205, 225, slicedCrimsonAlpha] });
+      .stroke({ width: 1.6, color: [255, 205, 225, slicedCrimsonAlpha], cap: roundCap, join: roundJoin });
   }
 
   if (hasSlashGold) {
     shapes.vfxSlashGold
       .fill(255, 230, 0, 225)
-      .stroke({ width: 1.4, color: [255, 245, 150, 210] });
+      .stroke({ width: 1.4, color: [255, 245, 150, 210], cap: roundCap, join: roundJoin });
   }
   if (hasSlashCyan) {
     shapes.vfxSlashCyan
       .fill(5, 213, 255, 225)
-      .stroke({ width: 1.4, color: [190, 248, 255, 210] });
+      .stroke({ width: 1.4, color: [190, 248, 255, 210], cap: roundCap, join: roundJoin });
   }
   if (hasSlashCrimson) {
     shapes.vfxSlashCrimson
       .fill(255, 42, 109, 225)
-      .stroke({ width: 1.4, color: [255, 165, 198, 210] });
+      .stroke({ width: 1.4, color: [255, 165, 198, 210], cap: roundCap, join: roundJoin });
   }
   if (hasSlashCore) {
     shapes.vfxSlashCore
       .fill(255, 255, 255, 248)
-      .stroke({ width: 1.1, color: [255, 255, 255, 225] });
+      .stroke({ width: 1.1, color: [255, 255, 255, 225], cap: roundCap, join: roundJoin });
   }
 
   const slashLunge = Math.max(reticlePulseHigh, reticlePulseLow) * 10 * stageScale;
