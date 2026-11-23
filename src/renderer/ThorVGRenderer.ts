@@ -1,6 +1,7 @@
 import ThorVG, {
   type ThorVGNamespace,
   type Animation as TvgAnimation,
+  type LottieAnimation as TvgLottieAnimation,
   type AnimationInfo,
   type Canvas as TvgCanvas,
 } from '@thorvg/webcanvas';
@@ -9,12 +10,17 @@ import splashLottie from '../logo/powred.by.thorvg.1.json?raw';
 import crewmateLottie from '../asset/Loading 50 _ Among Us.json?raw';
 import {
   CREWMATE_SKIN_CONFIG,
+  CREWMATE_SKIN_ORDER,
   FORM_CONFIG,
   type CrewmateSkinId,
   type RendererMode,
   type RenderFrameState,
 } from '../types/game';
 import { buildCharacterMatrix } from './characterMatrix';
+import {
+  CREWMATE_SKIN_LOTTIE_SLOTS,
+  getSlottedCrewmateLottieJson,
+} from './crewmateLottie';
 import { renderMacroWorldPass } from './passes/macroWorldPass';
 import {
   appendCutSeamQuad,
@@ -27,6 +33,10 @@ import {
 import { renderMenuPreviewPass } from './passes/previewPass';
 import { resetWorldShapeLayers, type TvgShapePool } from './passes/shapePool';
 import { prepareSplashLottie } from './splashLottie';
+
+export interface RendererInitOptions {
+  skipSplash?: boolean;
+}
 
 /**
  * Serializes ThorVG.init()/term() across renderer instances. Each job starts only after
@@ -79,12 +89,14 @@ export class ThorVGRenderer {
   private disposed: boolean = false;
 
   /**
-   * Every WASM object this renderer creates. Disposed explicitly before `term()` so
+   * Every persistent WASM object this renderer creates. Disposed explicitly before `term()` so
    * FinalizationRegistry never frees an older module's pointer on a newer WASM heap.
+   * (One-shot `LinearGradient`/`RadialGradient` handles transfer ownership to `Shape` on `fill()`
+   * and are NEVER added here.)
    */
   private ownedObjects: Array<{ dispose(): void }> = [];
 
-  // Startup splash ("Powered by ThorVG" Lottie). Kept hidden after it finishes.
+  // Startup splash ("Powered by ThorVG" Lottie). Immediately disposed after completion.
   private splashAnim: TvgAnimation | null = null;
   private splashInfo: AnimationInfo | null = null;
   private splashActive: boolean = false;
@@ -93,9 +105,15 @@ export class ThorVGRenderer {
   private splashCoreWidth: number = 1920;
   private splashCoreHeight: number = 1080;
 
-  // Main character: Among Us crewmate run-cycle Lottie (falls back to the form polygon).
-  private crewAnim: TvgAnimation | null = null;
+  // Main character: Slotted Among Us crewmate run-cycle LottieAnimation (falls back to polygon).
+  private crewAnim: TvgLottieAnimation | null = null;
   private crewInfo: AnimationInfo | null = null;
+  private crewSkinSlots: Partial<Record<CrewmateSkinId, number>> = {};
+  private appliedCrewSkin: CrewmateSkinId | null = null;
+  private lastCrewDrawSize: number = -1;
+
+  // Dirty-key cache for `shapes.bg` Cyber Horizon gradient so unchanged frames perform 0 mutations.
+  private lastBgGradKey: string = '';
 
   constructor(mode: RendererMode) {
     this.mode = mode;
@@ -104,10 +122,12 @@ export class ThorVGRenderer {
   public async init(
     canvasElement: HTMLCanvasElement,
     width: number,
-    height: number
+    height: number,
+    options?: RendererInitOptions
   ): Promise<void> {
     this.width = width;
     this.height = height;
+    this.lastBgGradKey = '';
 
     await enqueueEngineJob(async () => {
       if (this.disposed) return;
@@ -133,9 +153,11 @@ export class ThorVGRenderer {
       });
 
       const shapes: TvgShapePool = {
+        tvg: TVG,
         evenOddRule: TVG.FillRule.EvenOdd,
         bg: new TVG.Shape(),
         aurora: new TVG.Shape(),
+        skyDash: new TVG.Shape(),
         grid: new TVG.Shape(),
         waveFill: new TVG.Shape(),
         spectrum: new TVG.Shape(),
@@ -144,9 +166,11 @@ export class ThorVGRenderer {
         bandBass: new TVG.Shape(),
         bandSynth: new TVG.Shape(),
         bandTreble: new TVG.Shape(),
+        coreGlow: new TVG.Shape(),
         gimmicks: new TVG.Shape(),
         prismStars: new TVG.Shape(),
         timingRings: new TVG.Shape(),
+        trimArcs: new TVG.Shape(),
         traps: new TVG.Shape(),
         reticles: new TVG.Shape(),
         effects: new TVG.Shape(),
@@ -171,8 +195,11 @@ export class ThorVGRenderer {
       // NOTE (`[Fix 6]`): `vfxSliced*` MUST retain default `NonZero` (`FillRule.Winding`) — NEVER set `EvenOdd`!
       const addBlend = TVG.BlendMethod.Add;
       shapes.aurora.blend(addBlend);
+      shapes.skyDash.blend(addBlend);
       shapes.waveGlow.blend(addBlend);
+      shapes.coreGlow.blend(addBlend);
       shapes.timingRings.blend(addBlend);
+      shapes.trimArcs.blend(addBlend);
       shapes.reticles.blend(addBlend);
       shapes.playerGlow.blend(addBlend);
       shapes.skinFrontGlow.blend(addBlend);
@@ -190,6 +217,7 @@ export class ThorVGRenderer {
       this.ownedObjects.push(
         shapes.bg,
         shapes.aurora,
+        shapes.skyDash,
         shapes.grid,
         shapes.waveFill,
         shapes.spectrum,
@@ -198,9 +226,11 @@ export class ThorVGRenderer {
         shapes.bandBass,
         shapes.bandSynth,
         shapes.bandTreble,
+        shapes.coreGlow,
         shapes.gimmicks,
         shapes.prismStars,
         shapes.timingRings,
+        shapes.trimArcs,
         shapes.traps,
         shapes.reticles,
         shapes.effects,
@@ -223,6 +253,7 @@ export class ThorVGRenderer {
       this.canvas
         .add(shapes.bg)
         .add(shapes.aurora)
+        .add(shapes.skyDash)
         .add(shapes.grid)
         .add(shapes.waveFill)
         .add(shapes.spectrum)
@@ -231,9 +262,11 @@ export class ThorVGRenderer {
         .add(shapes.bandBass)
         .add(shapes.bandSynth)
         .add(shapes.bandTreble)
+        .add(shapes.coreGlow)
         .add(shapes.gimmicks)
         .add(shapes.prismStars)
         .add(shapes.timingRings)
+        .add(shapes.trimArcs)
         .add(shapes.traps)
         .add(shapes.reticles)
         .add(shapes.effects)
@@ -256,8 +289,10 @@ export class ThorVGRenderer {
         .add(shapes.vfxSlashCrimson)
         .add(shapes.vfxSlashCore);
 
-      // Added last so it draws above everything while active.
-      this.loadSplash(TVG);
+      // Added last so it draws above everything while active; completely skipped on live Sw <-> Gl switches.
+      if (!options?.skipSplash) {
+        this.loadSplash(TVG);
+      }
     });
   }
 
@@ -289,16 +324,32 @@ export class ThorVGRenderer {
   }
 
   private loadCrewmate(TVG: ThorVGNamespace): void {
+    this.crewSkinSlots = {};
+    this.appliedCrewSkin = null;
+    this.lastCrewDrawSize = -1;
     try {
-      const anim = new TVG.Animation();
+      const anim = new TVG.LottieAnimation();
       this.ownedObjects.push(anim);
-      anim.load(crewmateLottie);
+      anim.resolver(() => {});
+      anim.load(getSlottedCrewmateLottieJson(crewmateLottie));
       const info = anim.info();
       const picture = anim.picture;
       if (!info || info.totalFrames <= 0 || !picture) {
         throw new Error('crewmate Lottie has no frames');
       }
+      for (const skinId of CREWMATE_SKIN_ORDER) {
+        const slotId = anim.gen(CREWMATE_SKIN_LOTTIE_SLOTS[skinId]);
+        if (slotId > 0) {
+          this.crewSkinSlots[skinId] = slotId;
+        }
+      }
+      const defaultSlot = this.crewSkinSlots.classic;
+      if (defaultSlot !== undefined) {
+        anim.apply(defaultSlot);
+        this.appliedCrewSkin = 'classic';
+      }
       picture.size(CREW_SOURCE_SIZE, CREW_SOURCE_SIZE);
+      this.lastCrewDrawSize = CREW_SOURCE_SIZE;
       picture.visible(false);
       this.canvas!.add(picture);
       this.crewAnim = anim;
@@ -307,6 +358,9 @@ export class ThorVGRenderer {
       console.warn('Crewmate Lottie unavailable, using polygon character:', err);
       this.crewAnim = null;
       this.crewInfo = null;
+      this.crewSkinSlots = {};
+      this.appliedCrewSkin = null;
+      this.lastCrewDrawSize = -1;
     }
   }
 
@@ -317,15 +371,28 @@ export class ThorVGRenderer {
     rotation: number,
     flip: 1 | -1,
     runCycleTime: number,
-    alpha: number
+    alpha: number,
+    skinId: CrewmateSkinId = 'classic'
   ): void {
     const anim = this.crewAnim;
     const info = this.crewInfo;
     const picture = anim?.picture;
     if (!anim || !info || !picture) return;
 
+    if (this.appliedCrewSkin !== skinId) {
+      const slotId = this.crewSkinSlots[skinId];
+      if (slotId !== undefined) {
+        anim.apply(slotId);
+      }
+      this.appliedCrewSkin = skinId;
+    }
+
     const k = height / CREW_BOX.height;
-    picture.size(CREW_SOURCE_SIZE * k, CREW_SOURCE_SIZE * k);
+    const drawSize = CREW_SOURCE_SIZE * k;
+    if (Math.abs(drawSize - this.lastCrewDrawSize) > 0.01) {
+      picture.size(drawSize, drawSize);
+      this.lastCrewDrawSize = drawSize;
+    }
     const frame = (runCycleTime * info.fps) % info.totalFrames;
     anim.frame(frame);
 
@@ -353,6 +420,7 @@ export class ThorVGRenderer {
   }
 
   private clearGameplayLayers(): void {
+    this.lastBgGradKey = '';
     const shapes = this.shapes;
     if (!shapes) return;
     shapes.bg.reset().appendRect(0, 0, this.width, this.height).fill(0, 0, 0, 255);
@@ -383,6 +451,7 @@ export class ThorVGRenderer {
    * remnants survive across screen transitions.
    */
   public clearForTransition(): void {
+    this.lastBgGradKey = '';
     if (!this.canvas || !this.tvg || !this.shapes || this.disposed) return;
     const shapes = this.shapes;
     shapes.bg.reset().appendRect(0, 0, this.width, this.height).fill(7, 9, 20, 255);
@@ -429,16 +498,26 @@ export class ThorVGRenderer {
         cancelAnimationFrame(rafId);
         clearTimeout(safetyTimer);
         this.splashActive = false;
+        this.splashAnim = null;
+        this.splashInfo = null;
         if (!this.disposed) {
-          picture.visible(false);
+          // Remove from `ownedObjects` BEFORE disposing so `destroy()` never double-disposes `anim`.
+          const idx = this.ownedObjects.indexOf(anim);
+          if (idx !== -1) {
+            this.ownedObjects.splice(idx, 1);
+          }
           try {
+            picture.visible(false);
             this.canvas?.remove(picture);
           } catch {
             // Ignore if already detached from scene
           }
+          try {
+            anim.dispose();
+          } catch {
+            // Ignore disposal error
+          }
         }
-        this.splashAnim = null;
-        this.splashInfo = null;
         resolve();
       };
       const safetyTimer = setTimeout(finish, (durationSec + 1.5) * 1000);
@@ -479,6 +558,7 @@ export class ThorVGRenderer {
     if (width === this.width && height === this.height) return;
     this.width = width;
     this.height = height;
+    this.lastBgGradKey = '';
     if (this.canvas && !this.disposed) {
       this.canvas.resize(width, height);
       if (this.splashActive) {
@@ -494,6 +574,10 @@ export class ThorVGRenderer {
     previewSkin: CrewmateSkinId = 'classic'
   ): void {
     if (!this.canvas || !this.tvg || !this.shapes || this.disposed) return;
+
+    this.lastBgGradKey = '';
+    const roundCap = this.tvg.StrokeCap.Round;
+    const roundJoin = this.tvg.StrokeJoin.Round;
 
     this.shapes.reticles.reset().fill(0, 0, 0, 0);
     this.shapes.skinFront.reset().fill(0, 0, 0, 0);
@@ -546,6 +630,8 @@ export class ThorVGRenderer {
       .stroke({
         width: (previewSkin === 'classic' ? 1.8 : 2.2) * Math.max(0.85, scale),
         color: [tr, tg, tb, previewSkin === 'classic' ? 155 : 215],
+        cap: roundCap,
+        join: roundJoin,
       });
 
     if (this.crewAnim) {
@@ -566,7 +652,7 @@ export class ThorVGRenderer {
         overdriveActive: false,
         playerLane,
       });
-      this.drawCrewmate(playerX, cy, heightPx, playerRotation, 1, runCycle, 255);
+      this.drawCrewmate(playerX, cy, heightPx, playerRotation, 1, runCycle, 255, previewSkin);
     } else {
       this.shapes.skinFront.reset().fill(0, 0, 0, 0);
       this.shapes.skinFrontGlow.reset().fill(0, 0, 0, 0);
@@ -589,6 +675,8 @@ export class ThorVGRenderer {
     if (!this.canvas || !this.tvg || !this.shapes || this.disposed) return;
 
     const shapes = this.shapes;
+    const roundCap = this.tvg.StrokeCap.Round;
+    const roundJoin = this.tvg.StrokeJoin.Round;
     const { width, height, activeForm, frequency } = state;
     const activeSkin: CrewmateSkinId = state.skinId ?? 'classic';
 
@@ -606,21 +694,53 @@ export class ThorVGRenderer {
     // Linear up to 48x so calm close-up (1.42x) * 20.0x paused user zoom (28.4x) has 0.0px error
     const ts = (s: number) => s * Math.min(zoom, 48);
 
-    // 1. Background (Opaque #070914 in default mode; translucent beat-reactive dark scrim in video mode)
+    // 1. Cyber Horizon 3-Stop LinearGradient Background
+    // - Default mode (`!videoBgActive`): all stops strictly alpha 255
+    // - Video background mode (`videoBgActive`): all stops strictly alpha 128..148 dark scrim
+    // - Cache hit (`bgGradKey === this.lastBgGradKey`): skip ALL mutations on `shapes.bg` to preserve vertices & Fill!
     const pulseBoost = Math.floor((frequency.low * 0.6 + (state.beatPulse ?? 0) * 0.5) * 28);
     const videoBgActive = Boolean(state.videoBackgroundActive);
-    const bgAlpha = videoBgActive
-      ? Math.min(148, 128 + Math.round((state.beatPulse ?? 0) * 20))
+    const edgeAlpha = videoBgActive
+      ? Math.min(144, Math.max(128, 128 + Math.round((state.beatPulse ?? 0) * 16)))
       : 255;
-    shapes.bg
-      .reset()
-      .appendRect(0, 0, width, height)
-      .fill(
-        7 + Math.floor(pulseBoost * 0.5),
-        9 + Math.floor(pulseBoost * 0.3),
-        20 + pulseBoost,
-        bgAlpha
-      );
+    const midAlpha = videoBgActive ? Math.min(148, edgeAlpha + 4) : 255;
+    const bgGradKey = `${width}x${height}:${videoBgActive ? 1 : 0}:${activeForm}:${pulseBoost >> 1}:${edgeAlpha}`;
+
+    if (bgGradKey !== this.lastBgGradKey) {
+      this.lastBgGradKey = bgGradKey;
+      const bgGrad = new this.tvg.LinearGradient(0, 0, 0, Math.max(1, height));
+      if (videoBgActive) {
+        bgGrad.setStops(
+          [0, [7, 9, Math.min(255, 20 + Math.round(pulseBoost * 0.5)), edgeAlpha]],
+          [0.52, [8, 11, Math.min(255, 24 + pulseBoost), midAlpha]],
+          [1, [6, 8, 18, edgeAlpha]]
+        );
+      } else {
+        const [fr, fg, fb] = FORM_CONFIG[activeForm].rgb;
+        bgGrad.setStops(
+          [
+            0,
+            [
+              Math.min(255, 6 + Math.floor(pulseBoost * 0.35)),
+              Math.min(255, 10 + Math.floor(pulseBoost * 0.25)),
+              Math.min(255, 26 + pulseBoost),
+              255,
+            ],
+          ],
+          [
+            0.56,
+            [
+              Math.min(255, 10 + Math.round(fr * 0.045)),
+              Math.min(255, 13 + Math.round(fg * 0.045)),
+              Math.min(255, 32 + Math.round(fb * 0.05) + pulseBoost),
+              255,
+            ],
+          ],
+          [1, [5, 7, 16, 255]]
+        );
+      }
+      shapes.bg.reset().appendRect(0, 0, width, height).fill(bgGrad);
+    }
 
     // 2. Dynamic Speed Grid (Inverse-projected full-viewport adaptive vector grid)
     shapes.grid.reset().fill(0, 0, 0, 0);
@@ -648,7 +768,7 @@ export class ThorVGRenderer {
       color: videoBgActive ? [62, 108, 168, 104] : [40, 65, 110, 82],
     });
 
-    // `renderMacroWorldPass` resets all world layers including `shapes.reticles.reset().fill(0, 0, 0, 0)`
+    // `renderMacroWorldPass` resets all world layers including `skyDash`, `coreGlow`, `trimArcs`, and `reticles`
     renderMacroWorldPass(shapes, state, tx, ty, ts);
 
     // 3. Afterimage Trails, Speed Lines (`effects`) & 3-Color Additive Shockwaves + Diamond Shards (`vfx*`)
@@ -743,10 +863,12 @@ export class ThorVGRenderer {
         .stroke({
           width: isOverdrive ? 3.0 : 2.4,
           color: [er, eg, eb, isOverdrive ? 210 : 195],
+          cap: roundCap,
+          join: roundJoin,
         });
     }
 
-    // 4. Player Character (Crewmate Lottie + 4 Vector Skins & Agile Katana Stance, or Polygon fallback)
+    // 4. Player Character (Slotted Crewmate LottieAnimation + 4 Vector Skins & Agile Katana Stance, or Polygon fallback)
     const isInvulnerable = state.invulnerableTimer > 0 && !isOverdrive;
     const blink = isInvulnerable && Math.floor(state.timeSec * 12) % 2 === 0;
     const alphaRatio = blink ? 0.35 : isInvulnerable ? 0.65 : 1.0;
@@ -781,7 +903,16 @@ export class ThorVGRenderer {
         overdriveActive: isOverdrive,
         playerLane: state.playerLane,
       });
-      this.drawCrewmate(cx, cy, heightPx, stanceRotation, 1, state.runCycleTime, blink ? 90 : 255);
+      this.drawCrewmate(
+        cx,
+        cy,
+        heightPx,
+        stanceRotation,
+        1,
+        state.runCycleTime,
+        blink ? 90 : 255,
+        activeSkin
+      );
     } else {
       shapes.skinFront.reset().fill(0, 0, 0, 0);
       shapes.skinFrontGlow.reset().fill(0, 0, 0, 0);
@@ -819,19 +950,19 @@ export class ThorVGRenderer {
       shapes.vfxGold
         .fillRule(shapes.evenOddRule)
         .fill(255, 230, 65, 220)
-        .stroke({ width: vfxStrokeW, color: [255, 250, 190, 235] });
+        .stroke({ width: vfxStrokeW, color: [255, 250, 190, 235], cap: roundCap, join: roundJoin });
     }
     if (hasCyan) {
       shapes.vfxCyan
         .fillRule(shapes.evenOddRule)
         .fill(5, 213, 255, 220)
-        .stroke({ width: vfxStrokeW, color: [195, 248, 255, 235] });
+        .stroke({ width: vfxStrokeW, color: [195, 248, 255, 235], cap: roundCap, join: roundJoin });
     }
     if (hasCrimson) {
       shapes.vfxCrimson
         .fillRule(shapes.evenOddRule)
         .fill(255, 45, 108, 220)
-        .stroke({ width: vfxStrokeW, color: [255, 200, 220, 235] });
+        .stroke({ width: vfxStrokeW, color: [255, 200, 220, 235], cap: roundCap, join: roundJoin });
     }
 
     // 6. Pure Vector Polygon Slicing (`state.slicedHalves` -> `vfxSliced*` strictly NonZero + `vfxSlashCore` cut seam)
@@ -894,17 +1025,32 @@ export class ThorVGRenderer {
     if (slicedGoldAlpha > 0) {
       shapes.vfxSlicedGold
         .fill(255, 226, 48, Math.round(slicedGoldAlpha * 0.9))
-        .stroke({ width: slicedStrokeW, color: [255, 252, 200, slicedGoldAlpha] });
+        .stroke({
+          width: slicedStrokeW,
+          color: [255, 252, 200, slicedGoldAlpha],
+          cap: roundCap,
+          join: roundJoin,
+        });
     }
     if (slicedCyanAlpha > 0) {
       shapes.vfxSlicedCyan
         .fill(5, 213, 255, Math.round(slicedCyanAlpha * 0.9))
-        .stroke({ width: slicedStrokeW, color: [210, 250, 255, slicedCyanAlpha] });
+        .stroke({
+          width: slicedStrokeW,
+          color: [210, 250, 255, slicedCyanAlpha],
+          cap: roundCap,
+          join: roundJoin,
+        });
     }
     if (slicedCrimsonAlpha > 0) {
       shapes.vfxSlicedCrimson
         .fill(255, 42, 109, Math.round(slicedCrimsonAlpha * 0.9))
-        .stroke({ width: slicedStrokeW, color: [255, 205, 225, slicedCrimsonAlpha] });
+        .stroke({
+          width: slicedStrokeW,
+          color: [255, 205, 225, slicedCrimsonAlpha],
+          cap: roundCap,
+          join: roundJoin,
+        });
     }
 
     // 7. Pure 3rd-Order Bezier Tapered Vector Blades (`vfxSlash*` — NonZero additive winding)
@@ -1055,22 +1201,42 @@ export class ThorVGRenderer {
     if (hasSlashGold) {
       shapes.vfxSlashGold
         .fill(255, 230, 0, 225)
-        .stroke({ width: Math.max(1, ts(1.4)), color: [255, 245, 150, 210] });
+        .stroke({
+          width: Math.max(1, ts(1.4)),
+          color: [255, 245, 150, 210],
+          cap: roundCap,
+          join: roundJoin,
+        });
     }
     if (hasSlashCyan) {
       shapes.vfxSlashCyan
         .fill(5, 213, 255, 225)
-        .stroke({ width: Math.max(1, ts(1.4)), color: [190, 248, 255, 210] });
+        .stroke({
+          width: Math.max(1, ts(1.4)),
+          color: [190, 248, 255, 210],
+          cap: roundCap,
+          join: roundJoin,
+        });
     }
     if (hasSlashCrimson) {
       shapes.vfxSlashCrimson
         .fill(255, 42, 109, 225)
-        .stroke({ width: Math.max(1, ts(1.4)), color: [255, 165, 198, 210] });
+        .stroke({
+          width: Math.max(1, ts(1.4)),
+          color: [255, 165, 198, 210],
+          cap: roundCap,
+          join: roundJoin,
+        });
     }
     if (hasSlashCore) {
       shapes.vfxSlashCore
         .fill(255, 255, 255, 248)
-        .stroke({ width: Math.max(0.8, ts(1.1)), color: [255, 255, 255, 225] });
+        .stroke({
+          width: Math.max(0.8, ts(1.1)),
+          color: [255, 255, 255, 225],
+          cap: roundCap,
+          join: roundJoin,
+        });
     }
 
     this.canvas.update().render();
@@ -1080,6 +1246,23 @@ export class ThorVGRenderer {
     if (this.disposed) return;
     this.disposed = true;
     void enqueueEngineJob(() => {
+      // Strictly delete pre-generated Lottie slots BEFORE `ownedObjects` disposes `crewAnim` (`ptr === 0` guard).
+      if (this.crewAnim && !this.crewAnim.isDisposed) {
+        for (const slotId of Object.values(this.crewSkinSlots)) {
+          if (typeof slotId === 'number' && slotId > 0) {
+            try {
+              this.crewAnim.del(slotId);
+            } catch (err) {
+              console.warn('ThorVG crewmate slot delete failed:', err);
+            }
+          }
+        }
+      }
+      this.crewSkinSlots = {};
+      this.appliedCrewSkin = null;
+      this.lastCrewDrawSize = -1;
+      this.lastBgGradKey = '';
+
       for (const obj of this.ownedObjects) {
         try {
           obj.dispose();
@@ -1088,6 +1271,10 @@ export class ThorVGRenderer {
         }
       }
       this.ownedObjects = [];
+      this.crewAnim = null;
+      this.crewInfo = null;
+      this.splashAnim = null;
+      this.splashInfo = null;
       this.shapes = null;
       try {
         this.canvas?.destroy();

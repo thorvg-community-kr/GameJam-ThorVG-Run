@@ -444,7 +444,7 @@ export const StartScreen: React.FC<StartScreenProps> = ({
   const videoBgTip: MenuTooltipData = {
     id: 'track-video-bg',
     title: t.menu.videoBgTipTitle,
-    body: t.menu.videoBgTipBody,
+    body: isCoarsePointer ? t.menu.videoBgTipTouchBody : t.menu.videoBgTipBody,
     meta: videoBgEnabled ? t.menu.videoBgOnBtn : t.menu.videoBgOffBtn,
     accentHex: videoBgEnabled ? '#05D5FF' : '#94A3B8',
   };

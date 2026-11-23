@@ -59,6 +59,7 @@ export const DIFFICULTY_COURSE_TUNING: Record<DifficultyMode, CourseTuningProfil
   },
 };
 
+const MAX_BLUEPRINT_CACHE_ENTRIES = 16;
 const blueprintCache = new Map<string, TrackBlueprint>();
 
 /**
@@ -272,10 +273,12 @@ export async function analyzeTrackBlueprint(
   const tuning = DIFFICULTY_COURSE_TUNING[difficulty];
   const worldPxPerSec = diffCfg.worldPxPerSec;
   const segWidth = worldPxPerSec * SLICE_DURATION_SEC;
-  const cacheKey = `${track.id}:${difficulty}:v8`;
+  const cacheKey = `${track.id}:${difficulty}:v9`;
 
   const cached = blueprintCache.get(cacheKey);
   if (cached) {
+    blueprintCache.delete(cacheKey);
+    blueprintCache.set(cacheKey, cached);
     onProgress?.({ progress: 0.45, stage: 'analyzingBands' });
     await nextFrame();
     onProgress?.({ progress: 0.82, stage: 'buildingWaveform' });
@@ -660,6 +663,14 @@ export async function analyzeTrackBlueprint(
     totalStars,
   };
 
+  if (blueprintCache.has(cacheKey)) {
+    blueprintCache.delete(cacheKey);
+  }
+  while (blueprintCache.size >= MAX_BLUEPRINT_CACHE_ENTRIES) {
+    const oldestKey = blueprintCache.keys().next().value;
+    if (oldestKey === undefined) break;
+    blueprintCache.delete(oldestKey);
+  }
   blueprintCache.set(cacheKey, blueprint);
   onProgress?.({ progress: 1.0, stage: 'ready', blueprint });
   return blueprint;

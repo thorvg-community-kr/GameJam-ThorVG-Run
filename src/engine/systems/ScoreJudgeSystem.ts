@@ -4,6 +4,7 @@ import {
   type JudgmentCounts,
   type JudgmentFeedback,
   type JudgmentGrade,
+  type JudgmentTelemetry,
   type ResultRank,
   type SlashLane,
 } from '../../types/game';
@@ -22,9 +23,15 @@ export class ScoreJudgeSystem {
   public starsCollected: number = 0;
   public trapsDestroyed: number = 0;
   public gimmicksTriggered: number = 0;
+  public holdBreaks: number = 0;
   public activeJudgment: JudgmentFeedback | null = null;
 
   private judgmentCounts: JudgmentCounts = { perfect: 0, great: 0, good: 0, miss: 0 };
+  private criticalCount: number = 0;
+  private fastCount: number = 0;
+  private slowCount: number = 0;
+  private timedHitCount: number = 0;
+  private signedDeltaSumMs: number = 0;
   private judgmentTimer: number = 0;
   private nextJudgmentId: number = 1;
   private dirty: boolean = true;
@@ -37,7 +44,13 @@ export class ScoreJudgeSystem {
     this.starsCollected = 0;
     this.trapsDestroyed = 0;
     this.gimmicksTriggered = 0;
+    this.holdBreaks = 0;
     this.judgmentCounts = { perfect: 0, great: 0, good: 0, miss: 0 };
+    this.criticalCount = 0;
+    this.fastCount = 0;
+    this.slowCount = 0;
+    this.timedHitCount = 0;
+    this.signedDeltaSumMs = 0;
     this.activeJudgment = null;
     this.judgmentTimer = 0;
     this.dirty = true;
@@ -122,11 +135,31 @@ export class ScoreJudgeSystem {
     options?: {
       isCritical?: boolean;
       lane?: SlashLane | 'chord';
+      excludeFromTimingStats?: boolean;
     }
   ): number {
     let bonusPoints = 0;
     const isCritical = Boolean(options?.isCritical && grade === 'PERFECT');
     const lane = options?.lane;
+
+    if (isCritical) {
+      this.criticalCount += 1;
+    }
+
+    if (
+      grade !== 'MISS' &&
+      !options?.excludeFromTimingStats &&
+      signedDeltaMs !== undefined &&
+      Number.isFinite(signedDeltaMs)
+    ) {
+      this.timedHitCount += 1;
+      this.signedDeltaSumMs += signedDeltaMs;
+      if (signedDeltaMs < -12) {
+        this.fastCount += 1;
+      } else if (signedDeltaMs > 12) {
+        this.slowCount += 1;
+      }
+    }
 
     if (grade === 'PERFECT') {
       this.judgmentCounts.perfect++;
@@ -201,6 +234,38 @@ export class ScoreJudgeSystem {
     return bonusPoints;
   }
 
+  public recordHoldBreak(
+    prevGrade: JudgmentGrade,
+    prevWasCritical: boolean,
+    lane: SlashLane
+  ): void {
+    this.orbsCollected = Math.max(0, this.orbsCollected - 1);
+    if (prevGrade === 'PERFECT') {
+      this.judgmentCounts.perfect = Math.max(0, this.judgmentCounts.perfect - 1);
+    } else if (prevGrade === 'GREAT') {
+      this.judgmentCounts.great = Math.max(0, this.judgmentCounts.great - 1);
+    } else if (prevGrade === 'GOOD') {
+      this.judgmentCounts.good = Math.max(0, this.judgmentCounts.good - 1);
+    } else {
+      this.judgmentCounts.miss = Math.max(0, this.judgmentCounts.miss - 1);
+    }
+    if (prevWasCritical) {
+      this.criticalCount = Math.max(0, this.criticalCount - 1);
+    }
+    this.judgmentCounts.good += 1;
+    this.combo = 0;
+    this.holdBreaks += 1;
+    this.activeJudgment = {
+      id: this.nextJudgmentId++,
+      grade: 'GOOD',
+      bonusScore: 0,
+      isCritical: false,
+      lane,
+    };
+    this.judgmentTimer = 0.65;
+    this.dirty = true;
+  }
+
   public computeAccuracyAndRank(): { accuracy: number; rank: ResultRank } {
     const { perfect, great, good, miss } = this.judgmentCounts;
     const total = perfect + great + good + miss;
@@ -216,5 +281,19 @@ export class ScoreJudgeSystem {
 
   public snapshotCounts(): JudgmentCounts {
     return { ...this.judgmentCounts };
+  }
+
+  public snapshotTelemetry(): JudgmentTelemetry {
+    const rawMean =
+      this.timedHitCount > 0
+        ? Math.round((this.signedDeltaSumMs / this.timedHitCount) * 10) / 10
+        : 0;
+    return {
+      criticalCount: this.criticalCount,
+      fastCount: this.fastCount,
+      slowCount: this.slowCount,
+      timedHitCount: this.timedHitCount,
+      meanSignedDeltaMs: rawMean === 0 ? 0 : rawMean,
+    };
   }
 }

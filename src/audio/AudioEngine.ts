@@ -46,6 +46,10 @@ export class AudioEngine {
   private decodedUploads: Map<string, AudioBuffer> = new Map();
   /** Video ObjectURLs owned by AudioEngine keyed by custom track id. */
   private trackVideoUrls: Map<string, string> = new Map();
+  /** Deduplicated custom track metadata keyed by `name::size::lastModified`. */
+  private customTrackMetaBySig: Map<string, TrackMetadata> = new Map();
+  /** Reverse lookup from custom track id -> file signature for LRU/dispose cleanup. */
+  private customSigByTrackId: Map<string, string> = new Map();
   /** Oldest -> newest MRU order of custom track ids for bounded memory eviction. */
   private customTrackOrder: string[] = [];
   private customTrackSeq: number = 0;
@@ -246,6 +250,10 @@ export class AudioEngine {
     this.customTrackOrder.push(trackId);
   }
 
+  private buildLocalFileSignature(file: File): string {
+    return `${file.name}::${file.size}::${file.lastModified}`;
+  }
+
   public touchCustomTrack(trackId: string): void {
     const idx = this.customTrackOrder.indexOf(trackId);
     if (idx === -1 || idx === this.customTrackOrder.length - 1) return;
@@ -253,8 +261,30 @@ export class AudioEngine {
     this.customTrackOrder.push(trackId);
   }
 
+  public updateCustomTrackBpm(trackId: string, bpm: number): void {
+    if (!Number.isFinite(bpm) || bpm <= 0) return;
+    const roundedBpm = Math.round(bpm);
+    const sig = this.customSigByTrackId.get(trackId);
+    if (sig !== undefined) {
+      const cached = this.customTrackMetaBySig.get(sig);
+      if (cached && cached.id === trackId) {
+        this.customTrackMetaBySig.set(sig, { ...cached, bpm: roundedBpm });
+      }
+    }
+    if (this.currentTrack.id === trackId) {
+      this.currentTrack = { ...this.currentTrack, bpm: roundedBpm };
+    }
+  }
+
   public revokeTrackMedia(trackId: string): void {
     this.decodedUploads.delete(trackId);
+    const sig = this.customSigByTrackId.get(trackId);
+    if (sig !== undefined) {
+      this.customSigByTrackId.delete(trackId);
+      if (this.customTrackMetaBySig.get(sig)?.id === trackId) {
+        this.customTrackMetaBySig.delete(sig);
+      }
+    }
     const videoUrl = this.trackVideoUrls.get(trackId);
     if (videoUrl) {
       this.trackVideoUrls.delete(trackId);
@@ -312,6 +342,8 @@ export class AudioEngine {
       }
     }
     this.trackVideoUrls.clear();
+    this.customTrackMetaBySig.clear();
+    this.customSigByTrackId.clear();
     for (const id of this.customTrackOrder) {
       this.decodedUploads.delete(id);
     }
@@ -417,6 +449,34 @@ export class AudioEngine {
       throw new AudioLoadError('unsupported');
     }
 
+    const sig = this.buildLocalFileSignature(file);
+    const cachedMeta = this.customTrackMetaBySig.get(sig);
+    if (cachedMeta) {
+      const hasDecoded = this.decodedUploads.has(cachedMeta.id);
+      const cachedVideoUrl = this.trackVideoUrls.get(cachedMeta.id);
+      const videoValid = !cachedMeta.hasVideo || Boolean(cachedVideoUrl);
+      if (hasDecoded && videoValid) {
+        const reusedMeta: TrackMetadata = {
+          ...cachedMeta,
+          file,
+          videoUrl: cachedMeta.hasVideo ? cachedVideoUrl : undefined,
+        };
+        this.customTrackMetaBySig.set(sig, reusedMeta);
+        this.registerOrTouchCustomTrack(reusedMeta.id);
+        if (this.currentTrack.id === reusedMeta.id) {
+          this.currentTrack = {
+            ...this.currentTrack,
+            bpm: reusedMeta.bpm,
+            file,
+            videoUrl: reusedMeta.videoUrl,
+          };
+        }
+        return reusedMeta;
+      }
+      this.customTrackMetaBySig.delete(sig);
+      this.customSigByTrackId.delete(cachedMeta.id);
+    }
+
     const ctx = this.ensureContext();
     let decoded: AudioBuffer;
     try {
@@ -437,7 +497,7 @@ export class AudioEngine {
     }
     this.registerOrTouchCustomTrack(id);
 
-    return {
+    const meta: TrackMetadata = {
       id,
       title: stripAudioExtension(file.name),
       artist: '',
@@ -448,6 +508,9 @@ export class AudioEngine {
       hasVideo,
       videoUrl,
     };
+    this.customTrackMetaBySig.set(sig, meta);
+    this.customSigByTrackId.set(id, sig);
+    return meta;
   }
 
   public async startPlayback(): Promise<void> {

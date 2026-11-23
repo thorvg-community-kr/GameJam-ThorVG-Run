@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import { useCoarsePointer } from '../hooks/useCoarsePointer';
 import { useI18n } from '../i18n/I18nProvider';
 import type { LoadingProgress } from '../types/game';
 
@@ -12,6 +13,7 @@ export const TrackLoadingModal: React.FC<TrackLoadingModalProps> = ({
   loadingState,
 }) => {
   const { t } = useI18n();
+  const isCoarsePointer = useCoarsePointer();
   const pct = Math.min(100, Math.max(0, Math.round(loadingState.progress * 100)));
   const blueprint = loadingState.blueprint;
 
@@ -107,7 +109,7 @@ export const TrackLoadingModal: React.FC<TrackLoadingModalProps> = ({
         {/* How to Slash Guide */}
         <div className="loading-tip-box">
           <strong>{t.loading.tipTitle}</strong>
-          <p>{t.loading.tipBody}</p>
+          <p>{isCoarsePointer ? t.loading.tipTouchBody : t.loading.tipBody}</p>
         </div>
       </div>
     </div>

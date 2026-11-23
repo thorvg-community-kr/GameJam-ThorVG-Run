@@ -12,9 +12,10 @@ export type GuideDiagramKind = 'laneSlash' | 'chordHold' | 'hazardDodge' | 'mode
 interface GuideIllustrationProps {
   kind: GuideDiagramKind;
   svg: Messages['guide']['svg'];
+  isCoarsePointer: boolean;
 }
 
-const GuideIllustration: React.FC<GuideIllustrationProps> = ({ kind, svg }) => {
+const GuideIllustration: React.FC<GuideIllustrationProps> = ({ kind, svg, isCoarsePointer }) => {
   return (
     <svg
       viewBox="0 0 280 88"
@@ -262,7 +263,7 @@ const GuideIllustration: React.FC<GuideIllustrationProps> = ({ kind, svg }) => {
           <circle cx="151" cy="61" r="7" fill="none" stroke="#05D5FF" strokeWidth="1.8" />
           <line x1="156" y1="66" x2="162" y2="72" stroke="#05D5FF" strokeWidth="2" strokeLinecap="round" />
           <text x="169" y="64" fill="#B8F6FF" fontSize="9" fontWeight="800" fontFamily="monospace">
-            {svg.zoom}
+            {isCoarsePointer ? svg.zoomTouch : svg.zoom}
           </text>
         </g>
       )}
@@ -362,7 +363,7 @@ export const BeginnerGuideModal: React.FC<BeginnerGuideModalProps> = ({ open, on
         { text: isCoarsePointer ? c.chord.chipChordTouch : c.chord.chipChord, tone: 'gold' },
         { text: c.chord.chipHold, tone: 'cyan' },
       ],
-      desc: c.chord.desc,
+      desc: isCoarsePointer ? c.chord.descTouch : c.chord.desc,
     },
     {
       id: 'hazardDodge',
@@ -460,7 +461,11 @@ export const BeginnerGuideModal: React.FC<BeginnerGuideModalProps> = ({ open, on
                     <span className="guide-step-pill">{card.step}</span>
                     <strong className="guide-card-title">{card.title}</strong>
                   </div>
-                  <GuideIllustration kind={card.id} svg={t.guide.svg} />
+                  <GuideIllustration
+                    kind={card.id}
+                    svg={t.guide.svg}
+                    isCoarsePointer={isCoarsePointer}
+                  />
                   <div className="guide-chip-row">
                     {card.chips.map((chip) => (
                       <span key={chip.text} className={`guide-key-chip chip-${chip.tone}`}>
